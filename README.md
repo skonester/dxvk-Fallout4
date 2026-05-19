@@ -69,3 +69,14 @@ Using this Windows-native, Clang-compiled DXVK build for Fallout 4 offers severa
 * **vs. Linux (Proton + DXVK):** Since the game runs natively on Windows, it completely bypasses the system call translation overhead introduced by Wine/Proton on Linux. This results in comparable or better raw performance and lower latency, while utilizing the same Vulkan optimization advantages.
 * **Clang-cl Optimization:** Compiling with `clang-cl` matches the MSVC ABI exactly, ensuring clean integration with the Windows Universal C Runtime (UCRT) and Windows thread scheduling.
 
+---
+
+## Clang Compile-Time Optimizations (AVX2, FMA, & Fast-Math)
+
+Both the local `build_dx11.ps1` script and the GitHub Actions release workflows are configured to build with advanced compiler optimizations for modern CPUs:
+
+* **AVX2 (`-mavx2`):** Generates optimized Vector extensions for modern x86-64 processors (Intel Haswell / AMD Zen or newer), enhancing vertex processing and draw-call translation throughput.
+* **FMA (`-mfma`):** Utilizes Fused Multiply-Add instructions to perform floating-point multiply-accumulate operations in a single step, improving mathematical precision and execution speed.
+* **Fast-Math (`/fp:fast`):** Instructs Clang-CL to perform aggressive mathematical optimizations, allowing faster hardware vectorization for floating-point calculations.
+
+These options compile directly into the `d3d11.dll` and `dxgi.dll` binaries, yielding higher performance in CPU-limited scenarios.
