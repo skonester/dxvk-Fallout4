@@ -80,3 +80,16 @@ Both the local `build_dx11.ps1` script and the GitHub Actions release workflows 
 * **Fast-Math (`/fp:fast`):** Instructs Clang-CL to perform aggressive mathematical optimizations, allowing faster hardware vectorization for floating-point calculations.
 
 These options compile directly into the `d3d11.dll` and `dxgi.dll` binaries, yielding higher performance in CPU-limited scenarios.
+
+---
+
+## Optimized DXVK Configuration (`dxvk.conf`)
+
+An optimized `dxvk.conf` configuration template is provided at the root and under `/conf`. Copy this file into the game directory containing your `Fallout4.exe` to enable the following performance presets:
+
+* **Frame Rate Limiter (`dxgi.maxFrameRate = 60`):** Limits frame presentation to 60 FPS. Essential for preventing engine/physics speed-up bugs in Fallout 4 and maintaining uniform frame times.
+* **Low Input Latency (`dxgi.maxFrameLatency = 1`):** Limits the CPU flip queue to a single frame. Minimizes mouse latency and keeps gameplay highly responsive.
+* **VSync (`dxgi.syncInterval = 1`):** Synchronizes frames with the monitor refresh rate to completely eliminate screen tearing.
+* **Resource Caching (`d3d11.cachedDynamicResources = a`):** Caches dynamic Constant, Vertex, and Index buffers to significantly alleviate driver and CPU rendering bottlenecks.
+* **Relaxed Barriers (`d3d11.relaxedBarriers = True`):** Enables GPU pipeline overlap for optimized command execution.
+* **Async Shader Compilation (`dxvk.numCompilerThreads = 0`):** Instructs the compiler to utilize all available CPU threads for background shader compilation, avoiding stuttering when loading new graphics assets.
