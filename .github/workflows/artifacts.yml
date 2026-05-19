@@ -3,83 +3,73 @@ name: Artifacts (Package)
 on: [push, pull_request, workflow_dispatch]
 
 jobs:
-  artifacts-mingw-w64:
-    runs-on: ubuntu-latest
+  artifacts-windows-clang:
+    runs-on: windows-latest
 
     steps:
     - name: Checkout code
       id: checkout-code
       uses: actions/checkout@v4
       with:
-        submodules: recursive
         fetch-depth: 0
 
-    - name: Setup problem matcher
-      uses: Joshua-Ashton/gcc-problem-matcher@v3
+    - name: Setup glslangValidator
+      shell: pwsh
+      run: |
+        Invoke-WebRequest -Uri "https://raw.githubusercontent.com/HansKristian-Work/vkd3d-proton-ci/main/glslangValidator.exe" -OutFile "glslangValidator.exe"
+        Write-Output "$pwd" | Out-File -FilePath "${Env:GITHUB_PATH}" -Append
 
-    - name: Build release
-      id: build-release
-      uses: Joshua-Ashton/arch-mingw-github-action@v8
-      with:
-        command: |
-          export VERSION_NAME="${GITHUB_REF##*/}-${GITHUB_SHA##*/}"
-          ./package-release.sh ${VERSION_NAME} build --no-package
-          echo "VERSION_NAME=${VERSION_NAME}" >> $GITHUB_ENV
+    - name: Setup Meson
+      shell: pwsh
+      run: pip install meson
 
-    - name: Upload artifacts
-      id: upload-artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: dxvk-win-${{ env.VERSION_NAME }}
-        path: build/dxvk-${{ env.VERSION_NAME }}
-        if-no-files-found: error
+    - name: Find Visual Studio
+      shell: pwsh
+      run: |
+        $installationPath = Get-VSSetupInstance `
+          | Select-VSSetupInstance -Require Microsoft.VisualStudio.Workload.NativeDesktop -Latest `
+          | Select-Object -ExpandProperty InstallationPath
+        Write-Output "VSDEVCMD=${installationPath}\Common7\Tools\VsDevCmd.bat" `
+          | Out-File -FilePath "${Env:GITHUB_ENV}" -Append
 
-  artifacts-steamrt-sniper:
-    runs-on: ubuntu-latest
-    container: 
-      image: registry.gitlab.steamos.cloud/steamrt/sniper/sdk:beta
-      options: --user 1001
-
-    steps:
-    - name: Checkout code
-      id: checkout-code
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
-        fetch-depth: 0
-
-    - name: Setup problem matcher
-      uses: Joshua-Ashton/gcc-problem-matcher@v3
-
-    - name: Build release
-      id: build-release
+    - name: Get version
+      id: get-version
       shell: bash
       run: |
-        export VERSION_NAME="${GITHUB_REF##*/}-${GITHUB_SHA##*/}"
-        ./package-native.sh ${VERSION_NAME} build
-        echo "VERSION_NAME=${VERSION_NAME}" >> $GITHUB_ENV
+        echo "VERSION_NAME=${GITHUB_REF##*/}-${GITHUB_SHA##*/}" >> $GITHUB_ENV
+
+    - name: Build Clang x86
+      shell: pwsh
+      run: |
+        & "${Env:COMSPEC}" /s /c "`"${Env:VSDEVCMD}`" -arch=x86 -host_arch=x64 -no_logo && set" `
+          | % { , ($_ -Split '=', 2) } `
+          | % { [System.Environment]::SetEnvironmentVariable($_[0], $_[1]) }
+        $Env:CC = "clang-cl"
+        $Env:CXX = "clang-cl"
+        meson setup build-clang-x86 --buildtype release --backend ninja -Denable_d3d8=false -Denable_d3d9=false -Denable_d3d10=false
+        ninja -C build-clang-x86
+
+    - name: Build Clang x64
+      shell: pwsh
+      run: |
+        & "${Env:COMSPEC}" /s /c "`"${Env:VSDEVCMD}`" -arch=x64 -host_arch=x64 -no_logo && set" `
+          | % { , ($_ -Split '=', 2) } `
+          | % { [System.Environment]::SetEnvironmentVariable($_[0], $_[1]) }
+        $Env:CC = "clang-cl"
+        $Env:CXX = "clang-cl"
+        meson setup build-clang-x64 --buildtype release --backend ninja -Denable_d3d8=false -Denable_d3d9=false -Denable_d3d10=false
+        ninja -C build-clang-x64
+
+    - name: Prepare artifacts
+      shell: pwsh
+      run: |
+        mkdir artifacts\x32
+        ls -Path build-clang-x86\src -Include *.dll,*.pdb -Recurse | cp -Destination (Join-Path -Path (pwd) -ChildPath artifacts\x32)
+        mkdir artifacts\x64
+        ls -Path build-clang-x64\src -Include *.dll,*.pdb -Recurse | cp -Destination (Join-Path -Path (pwd) -ChildPath artifacts\x64)
 
     - name: Upload artifacts
-      id: upload-artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: dxvk-native-${{ env.VERSION_NAME }}
-        path: build/dxvk-native-${{ env.VERSION_NAME }}.tar.gz
-        if-no-files-found: error
-
-  merge-artifacts:
-    runs-on: ubuntu-latest
-    needs: [artifacts-mingw-w64, artifacts-steamrt-sniper]
-    steps:
-      - name: Get version
-        id: get-version
-        shell: bash
-        run: |
-          echo "VERSION_NAME=${GITHUB_REF##*/}-${GITHUB_SHA##*/}" >> $GITHUB_ENV
-
-      - name: Merge Artifacts
-        uses: actions/upload-artifact/merge@v4
-        with:
-          name: dxvk-${{ env.VERSION_NAME }}
-          pattern: dxvk*
-          delete-merged: true
+        name: dxvk-${{ env.VERSION_NAME }}-clang-package
+        path: artifacts\*
