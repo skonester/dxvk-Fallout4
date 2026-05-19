@@ -46,7 +46,7 @@ jobs:
           | % { [System.Environment]::SetEnvironmentVariable($_[0], $_[1]) }
         $Env:CC = "clang-cl"
         $Env:CXX = "clang-cl"
-        meson setup build-clang-x64 --buildtype release --backend ninja -Denable_d3d8=false -Denable_d3d9=false -Denable_d3d10=false
+        meson setup build-clang-x64 --buildtype release --backend ninja -Denable_d3d8=false -Denable_d3d9=false -Denable_d3d10=false -Dc_args="-mavx2 -mfma /fp:fast" -Dcpp_args="-mavx2 -mfma /fp:fast"
         ninja -C build-clang-x64
 
     - name: Prepare artifacts
