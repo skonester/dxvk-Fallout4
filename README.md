@@ -63,23 +63,44 @@ If you prefer to run the build steps manually in a Developer Command Prompt (x64
 
 ## Performance Comparison (Windows vs. Linux / Proton)
 
-Using this Windows-native, Clang-compiled DXVK build for Fallout 4 offers several benefits:
+Using this Windows-native, Clang-compiled DXVK build for Fallout 4 can help in CPU-bound scenes by moving D3D11 command translation onto DXVK's Vulkan backend:
 
-* **vs. Native D3D11 on Windows:** Significant reduction in CPU-bound draw call bottlenecks (e.g., downtown Boston stutters), leading to improved frame pacing and higher minimum framerates.
-* **vs. Linux (Proton + DXVK):** Since the game runs natively on Windows, it completely bypasses the system call translation overhead introduced by Wine/Proton on Linux. This results in comparable or better raw performance and lower latency, while utilizing the same Vulkan optimization advantages.
-* **Clang-cl Optimization:** Compiling with `clang-cl` matches the MSVC ABI exactly, ensuring clean integration with the Windows Universal C Runtime (UCRT) and Windows thread scheduling.
+* **vs. Native D3D11 on Windows:** DXVK can reduce some driver-side D3D11 overhead by translating work to Vulkan command submission. This is most relevant in CPU-limited areas with many objects, shadows, decals, and state changes, such as downtown Boston.
+* **vs. Linux / Proton + DXVK:** These DLLs are Windows PE binaries and run through Wine/Proton on Linux. They should not require Linux-native DXVK `.so` files, but final behavior still depends on Wine/Proton, the Vulkan driver, shader cache state, and CPU scheduling. Do not assume Windows and Linux results will be identical.
+* **Clang-cl Optimization:** Compiling with `clang-cl` keeps the MSVC ABI while allowing the project to use LLVM's optimizer. The build uses the static MSVC runtime setting, so the generated DLLs are intended to avoid extra MSVC redistributable dependencies.
 
 ---
 
-## Clang Compile-Time Optimizations (AVX2, FMA, & Fast-Math)
+## Experimental SIMD / AVX2 Build
 
-Both the local `build_dx11.ps1` script and the GitHub Actions release workflows are configured to build with advanced compiler optimizations for modern CPUs:
+This repository includes an optional experimental SIMD build path for selected DXVK hot paths. Enable it with:
 
-* **AVX2 (`-mavx2`):** Generates optimized Vector extensions for modern x86-64 processors (Intel Haswell / AMD Zen or newer), enhancing vertex processing and draw-call translation throughput.
-* **FMA (`-mfma`):** Utilizes Fused Multiply-Add instructions to perform floating-point multiply-accumulate operations in a single step, improving mathematical precision and execution speed.
-* **Fast-Math (`/fp:fast`):** Instructs Clang-CL to perform aggressive mathematical optimizations, allowing faster hardware vectorization for floating-point calculations.
+```powershell
+$env:DXVK_EXPERIMENTAL_SIMD = "1"
+$env:DXVK_BUILD_DIR = "build_clang_simd"
+.\build_dx11.ps1
+```
 
-These options compile directly into the `d3d11.dll` and `dxgi.dll` binaries, yielding higher performance in CPU-limited scenarios.
+The experimental build uses AVX2-capable compiler flags and compiles selected translation units with SIMD-specific code paths. It requires an AVX2-capable x86-64 CPU, such as Intel Haswell or newer, or AMD Excavator / Zen or newer.
+
+### Why This Can Help Fallout 4 Draw Calls
+
+Fallout 4's heavy scenes are often limited by CPU-side rendering work rather than raw GPU shader throughput. Downtown Boston is a common stress case because the renderer has to process many visible objects, dynamic buffers, state changes, draw submissions, shadows, decals, and visibility results in a dense area. DXVK already helps by changing the D3D11 driver path; the SIMD build tries to shave overhead from repeated CPU-side helper work around that translation.
+
+The current experimental SIMD path targets small but frequently repeated operations, including:
+
+* Matrix and vector math used by rendering helpers.
+* SPIR-V decompression and shader-key/hash helpers.
+* Image row packing and descriptor update copies.
+* Statistics counter updates.
+* UTF/string helper scans used by utility paths.
+* Allocator page-mask fills used by memory/debug accounting paths.
+* LRU recent-key checks for trivially copyable 64-bit keys.
+* Blend-state normalization comparisons.
+
+These optimizations are not a replacement for engine fixes, precombines, shadow-distance tuning, or reducing script/mod load. They also do not reduce the number of draw calls the game submits. The goal is narrower: reduce some CPU cycles spent per repeated DXVK-side operation so frame pacing can improve when the game is already close to the CPU limit.
+
+Expected impact is workload-dependent. The best-case improvement is usually smoother minimum frame times in dense areas; the realistic worst case is no measurable change. Treat this as an experimental performance profile, not a guaranteed FPS multiplier.
 
 ---
 
