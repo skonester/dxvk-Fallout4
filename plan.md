@@ -1,212 +1,106 @@
-# Safe AVX2/FMA Implementation Plan
+# DXVK Fallout 4 Stabilization Plan
 
-Goal: reintroduce targeted AVX2/FMA optimizations without changing DXVK behavior, ABI, object layout, or memory alignment assumptions. Each phase should build, run in Fallout 4, and be easy to revert independently.
+## Summary
 
-## Ground Rules
+This is the active roadmap for the Fallout 4 DXVK build.
 
-- Keep every optimization in a small, reviewable commit.
-- Prefer local helper functions over broad rewrites of render state, hashing, descriptors, or pipeline keys.
-- Do not enable global `-ffast-math`, `/fp:fast`, or broad FMA contraction for the whole project.
-- Do not compare or hash whole structs with `memcmp` or CRC unless all padding bytes are known initialized and the original equality semantics are byte-exact.
-- Do not use aligned or streaming stores unless the destination alignment is proven with code-level guarantees.
-- Prefer `_mm_loadu_*` and `_mm_storeu_*` for general-purpose vector/matrix code.
-- Keep scalar fallback code as the reference implementation.
-- Gate AVX2/FMA code with compile-time checks and, where needed, runtime CPU feature checks.
+The old AVX2/FMA Phases 1-6 are treated as completed historical work. The current goal is not to add more speculative SIMD. The goal is to keep the native Windows `clang-cl` D3D11/DXGI build reproducible, keep experimental SIMD opt-in, and only retain optimizations that survive both build validation and Fallout 4 smoke testing.
 
-## Known Bad Patterns To Avoid
+## Known Good State
 
-- `_mm256_stream_si256` on memory that is only 16-byte aligned.
-- `_mm256_store_si256` / `_mm256_load_si256` unless 32-byte alignment is guaranteed.
-- Replacing `std::memcpy` with typed pointer writes where alignment or aliasing is uncertain.
-- Rewriting pipeline state equality/hash functions to read padding bytes.
-- Changing global compiler flags in `meson.build` that affect all floating-point behavior.
+- The stable build path is the native Windows `clang-cl` build driven by `build_dx11.ps1`.
+- The default build must remain non-experimental unless `DXVK_EXPERIMENTAL_SIMD=1` is set.
+- `llvm-lib.exe`, `lld-link.exe`, and `llvm-rc.exe` must be discoverable without user-specific hardcoded paths.
+- The SPIR-V append byte-count fix is correctness work, not an optimization experiment.
+- AVX2 descriptor copy must avoid aligned or streaming stores unless alignment is guaranteed in code.
+- Experimental SIMD DLLs must be built and tested separately from the stable build DLLs.
 
-## Phase 1: Baseline And Safety Harness
+## Build Reliability
 
-- [x] Keep current stable build as the baseline.
-- [x] Confirm `build_dx11.ps1` performs a clean configure when `build_clang` belongs to another source tree.
-- [x] Add a short `README` or section in this plan with the exact game smoke test steps.
-- [x] Build once with no AVX2/FMA changes and record DLL sizes and game behavior.
+`build_dx11.ps1` is the supported build entry point for D3D11 and DXGI.
 
-Validation:
+The script should keep discovering tools portably:
 
-- `powershell.exe -ExecutionPolicy Bypass -File .\build_dx11.ps1`
-- Copy `build_clang/src/d3d11/d3d11.dll` and `build_clang/src/dxgi/dxgi.dll` to the Fallout 4 test folder.
-- Launch Fallout 4 and verify it reaches gameplay without crashing.
+- Visual Studio C++ build environment through `vcvarsall.bat`.
+- LLVM tools through `PATH`, common install locations, or `DXVK_LLVM_BIN`.
+- `glslangValidator.exe` through `PATH`, vcpkg-style installs, or `DXVK_GLSLANG_DIR`.
+- Meson through `meson.exe`, `python.exe -m mesonbuild.mesonmain`, or `py.exe -3 -m mesonbuild.mesonmain`.
 
-## Build And Smoke Test Steps
+Supported build knobs:
+
+- `DXVK_BUILD_DIR`: choose a build directory.
+- `DXVK_RECONFIGURE=1`: force Meson reconfiguration.
+- `DXVK_EXPERIMENTAL_SIMD=1`: enable the opt-in SIMD build.
+- `DXVK_LLVM_BIN`: explicitly point to LLVM `bin`.
+- `DXVK_GLSLANG_DIR`: explicitly point to the directory containing `glslangValidator.exe`.
 
 Stable build:
 
-- Run `powershell.exe -ExecutionPolicy Bypass -File .\build_dx11.ps1`.
-- Test `build_clang/src/d3d11/d3d11.dll`.
-- Test `build_clang/src/dxgi/dxgi.dll`.
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build_dx11.ps1
+```
 
 Experimental SIMD build:
 
-- Run `$env:DXVK_BUILD_DIR='build_clang_simd'; $env:DXVK_EXPERIMENTAL_SIMD='1'; powershell.exe -ExecutionPolicy Bypass -File .\build_dx11.ps1`.
-- Test `build_clang_simd/src/d3d11/d3d11.dll`.
-- Test `build_clang_simd/src/dxgi/dxgi.dll`.
+```powershell
+$env:DXVK_BUILD_DIR='build_clang_simd'
+$env:DXVK_EXPERIMENTAL_SIMD='1'
+$env:DXVK_RECONFIGURE='1'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build_dx11.ps1
+```
 
-Fallout 4 smoke test:
+## Runtime Stability
 
-- Launch to the main menu.
+Fallout 4 game testing is the deciding validation step for D3D11/DXGI changes.
+
+Smoke test procedure:
+
+- Copy the candidate `d3d11.dll` and `dxgi.dll` into the Fallout 4 test folder.
+- Launch Fallout 4 to the main menu.
 - Load a save into gameplay.
 - Visit an indoor cell.
 - Visit an outdoor worldspace.
 - Rotate the camera quickly for at least 30 seconds.
-- Trigger shader/pipeline activity by changing areas or loading a save with different lighting/weather.
-- Check the DXVK log for new errors, device-loss messages, or descriptor/pipeline warnings.
+- Trigger shader and pipeline activity by changing areas or loading a save with different lighting or weather.
+- Check DXVK logs for new errors, device-loss messages, descriptor warnings, or pipeline warnings.
 
-## Phase 2: Safe Vector Helpers
+Acceptance criteria:
 
-Candidate file:
+- Stable build compiles and works in Fallout 4.
+- Experimental SIMD build compiles and does not crash or visibly corrupt rendering.
+- Stable and experimental DLLs are tested separately.
+- Any runtime failure is treated as more important than a successful compile.
 
-- `src/util/util_vector.h`
+## SIMD Containment
 
-Scope:
+Experimental SIMD remains opt-in through `DXVK_EXPERIMENTAL_SIMD=1`.
 
-- Reintroduce SSE-only float `Vector4` helpers using unaligned loads/stores:
-  - [x] `operator+`
-  - [x] `operator-`
-  - [x] scalar `operator*`
-  - [x] component `operator*`
-  - [x] `operator+=`
-  - [x] `operator-=`
-  - [x] `operator*=`
+Current SIMD policy:
 
-Rules:
+- Keep vector and matrix SIMD only if stable in game.
+- Keep descriptor SIMD only with unaligned AVX2 stores and successful Fallout 4 testing.
+- Do not add new SIMD hot paths without profiling evidence and a separate smoke-tested build.
+- Do not use `_mm256_stream_si256`, `_mm256_store_si256`, or `_mm256_load_si256` unless 32-byte alignment is guaranteed in code.
+- Prefer `_mm_loadu_*`, `_mm_storeu_*`, `_mm256_loadu_*`, and `_mm256_storeu_*` for general-purpose vector and matrix code.
+- Do not enable project-wide `-ffast-math`, `/fp:fast`, or broad FMA contraction.
 
-- Use `_mm_loadu_ps` and `_mm_storeu_ps`.
-- Do not use `_mm_dp_ps` unless SSE4.1 availability is explicitly guaranteed.
-- Do not change `Vector4` size, alignment, constructors, or public layout.
-- Keep scalar code as fallback.
+Current SIMD risk register:
 
-Validation:
+- Descriptor updates are the highest-risk SIMD area because they interact with runtime-visible descriptor memory.
+- Matrix FMA can introduce tiny floating-point differences, so visual testing matters even when builds pass.
+- SPIR-V byte copying should remain correctness-focused and should not become a speculative SIMD parser rewrite.
 
-- [x] Build.
-- [x] Run Fallout 4 smoke test.
-- If stable, keep as a separate commit.
+If the experimental SIMD build breaks the game again, first disable the descriptor-info SIMD split while leaving matrix SIMD enabled. If that is still unstable, fall back to the stable build and reintroduce one SIMD area at a time.
 
-## Phase 3: Safe Matrix Bulk Operations
+## Cleanup Notes
 
-Candidate file:
+- `clang-cl-dxvk-optimized.ini` is optional manual investigation config, not the main build path.
+- `build_dx11.backup.ps1` is a temporary backup and should eventually be removed once the portable script is trusted.
+- Old MinGW and optimization-remark probe plans are retired.
 
-- `src/util/util_matrix.cpp`
+## Next Decisions
 
-Scope:
-
-- Reintroduce AVX2 paths only for byte-contiguous matrix operations:
-  - [x] `Matrix4::operator+`
-  - [x] `Matrix4::operator-`
-  - [x] scalar `Matrix4::operator*`
-  - [x] scalar `Matrix4::operator/`
-  - [x] `hadamardProduct`
-
-Rules:
-
-- Use `_mm256_loadu_ps` and `_mm256_storeu_ps`.
-- Avoid streaming stores.
-- Avoid changing `Matrix4::operator*(const Matrix4&)` in this phase.
-- Avoid changing `Matrix4::operator*(const Vector4&)` in this phase.
-
-Validation:
-
-- [x] Build.
-- [x] Build default non-AVX2 configuration.
-- [x] Build experimental AVX2 configuration with `DXVK_EXPERIMENTAL_SIMD=1`.
-- [x] Run Fallout 4 smoke test with `build_clang_simd` DLLs.
-- [x] Compare logs for new warnings/errors.
-- Keep as a separate commit only if stable.
-
-## Phase 4: FMA Matrix Multiply Experiment
-
-Candidate file:
-
-- `src/util/util_matrix.cpp`
-
-Scope:
-
-- Add optional FMA path for:
-  - [x] `Matrix4::operator*(const Matrix4&)`
-  - [x] `Matrix4::operator*(const Vector4&)`
-
-Rules:
-
-- Do not enable global fast-math.
-- Use explicit `_mm_fmadd_ps` only inside the helper.
-- Expect tiny floating-point differences; test visually and for crashes.
-- Keep this phase separate from AVX2 bulk operations.
-
-Validation:
-
-- [x] Build default non-FMA configuration.
-- [x] Build experimental FMA configuration with `DXVK_EXPERIMENTAL_SIMD=1`.
-- [x] Run Fallout 4 smoke test.
-- Test several scenes:
-  - [x] Main menu.
-  - [x] Indoor cell.
-  - [x] Outdoor world.
-  - [x] Combat or fast camera movement.
-- Revert this phase if there are visual artifacts, unstable camera/projection behavior, or crashes.
-
-## Phase 5: Descriptor Copy Investigation
-
-Candidate file:
-
-- `src/dxvk/dxvk_descriptor_info.cpp`
-
-Scope:
-
-- [x] Investigate descriptor copy hot paths only after vector/matrix changes are stable.
-- [x] Add AVX2 copy path for 32-byte-aligned descriptor ranges with sizes that are multiples of 32.
-- [x] Compile descriptor-info SIMD path only in the experimental build.
-
-Rules:
-
-- [x] Do not use `_mm256_stream_si256` unless destination alignment is guaranteed to be 32 bytes.
-- If AVX2 is used, either:
-  - [x] require `alignment >= 32`, or
-  - use unaligned `_mm256_storeu_si256`.
-- [x] Preserve current generic copy behavior for uncertain alignment.
-- [ ] Benchmark or profile before keeping changes.
-
-Validation:
-
-- [x] Build default configuration.
-- [x] Build experimental AVX2 descriptor-copy configuration.
-- [x] Run Fallout 4 smoke test.
-- [ ] Stress scene changes and shader/pipeline creation.
-
-## Phase 6: Optional Build Flags
-
-Scope:
-
-- [x] Avoid project-wide AVX2/FMA flags until code-level optimization is proven stable.
-- [x] Add a Meson option for an experimental optimized build, disabled by default.
-- [x] Compile only `src/util/util_matrix.cpp` with AVX2 when the experimental option is enabled.
-
-Rules:
-
-- [x] No default `-ffast-math`, `/fp:fast`, or global FMA contraction.
-- [x] Any new option must be opt-in and clearly named experimental.
-
-Possible option:
-
-- [x] `-Ddxvk_experimental_simd=true`
-
-Validation:
-
-- [x] Default build remains stable.
-- [x] Experimental build compiles separately.
-- [x] Experimental build is tested in Fallout 4.
-
-## Rollback Strategy
-
-- Each phase should be one commit.
-- If Fallout 4 crashes, revert only the latest phase.
-- If a phase needs more work, disable it behind a local macro before trying a narrower version.
-
-## Initial Recommendation
-
-The implemented SIMD set is now intentionally limited to vector helpers, matrix operations, and a guarded descriptor copy path. Further descriptor work should wait for profiling evidence.
+- Keep `build_dx11.ps1` as the single normal build entry point.
+- Keep experimental SIMD separate in `build_clang_simd`.
+- Do not expand SIMD until both stable and experimental builds have fresh Fallout 4 smoke-test results.
+- Once the portable build script is trusted on another machine, remove the backup script and update the README with the final build commands.

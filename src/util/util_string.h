@@ -10,6 +10,10 @@
 #include "util_bit.h"
 #include "util_likely.h"
 
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
+
 namespace dxvk::str {
 
   template<size_t S> struct UnicodeChar { };
@@ -108,6 +112,48 @@ namespace dxvk::str {
    */
   template<typename S>
   size_t length(const S* string) {
+#if defined(__AVX2__)
+    if constexpr (sizeof(S) == 1) {
+      auto ptr = reinterpret_cast<const uint8_t*>(string);
+      size_t result = 0;
+
+      while (uintptr_t(ptr + result) & 31u) {
+        if (!ptr[result])
+          return result;
+        result++;
+      }
+
+      const __m256i zero = _mm256_setzero_si256();
+      for (;;) {
+        __m256i chars = _mm256_load_si256(reinterpret_cast<const __m256i*>(ptr + result));
+        uint32_t mask = uint32_t(_mm256_movemask_epi8(_mm256_cmpeq_epi8(chars, zero)));
+        if (mask)
+          return result + bit::tzcnt(mask);
+
+        result += 32;
+      }
+    } else if constexpr (sizeof(S) == 2) {
+      auto ptr = reinterpret_cast<const uint16_t*>(string);
+      size_t result = 0;
+
+      while (uintptr_t(ptr + result) & 31u) {
+        if (!ptr[result])
+          return result;
+        result++;
+      }
+
+      const __m256i zero = _mm256_setzero_si256();
+      for (;;) {
+        __m256i chars = _mm256_load_si256(reinterpret_cast<const __m256i*>(ptr + result));
+        __m256i cmp = _mm256_cmpeq_epi16(chars, zero);
+        uint32_t mask = uint32_t(_mm256_movemask_epi8(cmp));
+        if (mask)
+          return result + (bit::tzcnt(mask) >> 1);
+
+        result += 16;
+      }
+    }
+#endif
     size_t result = 0;
 
     while (string[result])
@@ -141,8 +187,50 @@ namespace dxvk::str {
           size_t  srcLength) {
     size_t totalLength = 0;
 
-    auto dstEnd = dstBegin + dstLength;
+    auto dstEnd = dstBegin ? dstBegin + dstLength : nullptr;
     auto srcEnd = srcBegin + srcLength;
+
+#if defined(__AVX2__)
+    if constexpr (sizeof(S) == 1 && sizeof(D) == 2) {
+      while (srcBegin + 16 <= srcEnd && (!dstBegin || totalLength + 16 <= dstLength)) {
+        __m128i chars = _mm_loadu_si128(reinterpret_cast<const __m128i*>(srcBegin));
+        int mask = _mm_movemask_epi8(chars);
+        if (mask != 0)
+          break;
+
+        __m128i zero_cmp = _mm_cmpeq_epi8(chars, _mm_setzero_si128());
+        int zero_mask = _mm_movemask_epi8(zero_cmp);
+        if (zero_mask != 0)
+          break;
+
+        if (dstBegin) {
+          __m256i wide_chars = _mm256_cvtepu8_epi16(chars);
+          _mm256_storeu_si256(reinterpret_cast<__m256i*>(dstBegin + totalLength), wide_chars);
+        }
+        totalLength += 16;
+        srcBegin += 16;
+      }
+    } else if constexpr (sizeof(S) == 2 && sizeof(D) == 1) {
+      while (srcBegin + 8 <= srcEnd && (!dstBegin || totalLength + 8 <= dstLength)) {
+        __m128i chars = _mm_loadu_si128(reinterpret_cast<const __m128i*>(srcBegin));
+
+        __m128i high_bits = _mm_and_si128(chars, _mm_set1_epi16(-128));
+        if (_mm_movemask_epi8(high_bits) != 0)
+          break;
+
+        __m128i zero_cmp = _mm_cmpeq_epi16(chars, _mm_setzero_si128());
+        if (_mm_movemask_epi8(zero_cmp) != 0)
+          break;
+
+        if (dstBegin) {
+          __m128i packed = _mm_packus_epi16(chars, chars);
+          _mm_storel_epi64(reinterpret_cast<__m128i*>(dstBegin + totalLength), packed);
+        }
+        totalLength += 8;
+        srcBegin += 8;
+      }
+    }
+#endif
 
     while (srcBegin < srcEnd) {
       uint32_t ch;

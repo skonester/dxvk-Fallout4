@@ -1,5 +1,9 @@
 #include "dxvk_shader_key.h"
 
+#if defined(__AVX2__)
+#include <cstring>
+#endif
+
 namespace dxvk {
 
   DxvkShaderHash::DxvkShaderHash() {
@@ -69,6 +73,9 @@ namespace dxvk {
 
 
   bool DxvkShaderHash::eq(const DxvkShaderHash& other) const {
+#if defined(__AVX2__)
+    return std::memcmp(this, &other, sizeof(DxvkShaderHash)) == 0;
+#else
     bool eq = m_stage == other.m_stage
            && m_xfb == other.m_xfb
            && m_size == other.m_size;
@@ -77,10 +84,25 @@ namespace dxvk {
       eq = eq && m_hash[i] == other.m_hash[i];
 
     return eq;
+#endif
   }
 
 
   size_t DxvkShaderHash::hash() const {
+#if defined(__AVX2__)
+    DxvkHashState hash = { };
+    
+    uint64_t meta;
+    std::memcpy(&meta, this, sizeof(meta));
+    hash.add(meta);
+
+    uint64_t hash_dw[2];
+    std::memcpy(hash_dw, m_hash.data(), sizeof(hash_dw));
+    hash.add(hash_dw[0]);
+    hash.add(hash_dw[1]);
+
+    return hash;
+#else
     DxvkHashState hash = { };
     hash.add(m_stage);
     hash.add(m_xfb);
@@ -90,6 +112,7 @@ namespace dxvk {
       hash.add(dw);
 
     return hash;
+#endif
   }
 
 

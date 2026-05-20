@@ -1,5 +1,9 @@
 #include <cstring>
 
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
+
 #include "dxvk_format.h"
 #include "dxvk_util.h"
 
@@ -19,6 +23,32 @@ namespace dxvk::util {
   }
   
   
+#if defined(__AVX2__)
+  static inline void copyRowAVX2(char* dst, const char* src, size_t size) {
+    size_t i = 0;
+    for (; i + 32 <= size; i += 32) {
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(dst + i),
+                           _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i)));
+    }
+    if (i + 16 <= size) {
+      _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + i),
+                       _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i)));
+      i += 16;
+    }
+    if (i + 8 <= size) {
+      std::memcpy(dst + i, src + i, 8);
+      i += 8;
+    }
+    if (i + 4 <= size) {
+      std::memcpy(dst + i, src + i, 4);
+      i += 4;
+    }
+    for (; i < size; i++) {
+      dst[i] = src[i];
+    }
+  }
+#endif
+
   void packImageData(
           void*             dstBytes,
     const void*             srcBytes,
@@ -41,10 +71,17 @@ namespace dxvk::util {
     } else {
       for (uint32_t i = 0; i < blockCount.depth; i++) {
         for (uint32_t j = 0; j < blockCount.height; j++) {
+#if defined(__AVX2__)
+          copyRowAVX2(
+            dstData + j * bytesPerRow,
+            srcData + j * pitchPerRow,
+            bytesPerRow);
+#else
           std::memcpy(
             dstData + j * bytesPerRow,
             srcData + j * pitchPerRow,
             bytesPerRow);
+#endif
         }
         
         srcData += pitchPerLayer;
@@ -115,10 +152,17 @@ namespace dxvk::util {
         } else {
           for (uint32_t i = 0; i < blockCount.depth; i++) {
             for (uint32_t j = 0; j < blockCount.height; j++) {
+#if defined(__AVX2__)
+              copyRowAVX2(
+                dstData + j * dstRowPitch,
+                srcData + j * srcRowPitch,
+                bytesPerRow);
+#else
               std::memcpy(
                 dstData + j * dstRowPitch,
                 srcData + j * srcRowPitch,
                 bytesPerRow);
+#endif
             }
 
             switch (imageType) {

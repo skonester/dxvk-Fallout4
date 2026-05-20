@@ -2,6 +2,7 @@
 
 #include "dxvk_format.h"
 #include "dxvk_limits.h"
+#include "dxvk_hash.h"
 
 #include <atomic>
 #include <cstring>
@@ -647,8 +648,17 @@ namespace dxvk {
     }
 
     size_t hash() const {
+#if defined(__AVX2__) && defined(DXVK_ARCH_X86_64)
+      auto ptr = reinterpret_cast<const __m256i*>(this);
+      DxvkHashState4 state;
+      for (size_t i = 0; i < sizeof(*this) / 32; i++) {
+        state.add(_mm256_load_si256(ptr + i));
+      }
+      return state.get(0) ^ state.get(1) ^ state.get(2) ^ state.get(3);
+#else
       auto src = reinterpret_cast<const unsigned char*>(this);
       return size_t(bit::fnv1a_hash(src, sizeof(*this)));
+#endif
     }
 
     bool useDynamicDepthTest() const {
@@ -749,8 +759,17 @@ namespace dxvk {
     }
     
     size_t hash() const {
+#if defined(__AVX2__) && defined(DXVK_ARCH_X86_64)
+      auto ptr = reinterpret_cast<const __m256i*>(this);
+      DxvkHashState4 state;
+      for (size_t i = 0; i < sizeof(*this) / 32; i++) {
+        state.add(_mm256_load_si256(ptr + i));
+      }
+      return state.get(0) ^ state.get(1) ^ state.get(2) ^ state.get(3);
+#else
       auto src = reinterpret_cast<const unsigned char*>(this);
       return size_t(bit::fnv1a_hash(src, sizeof(*this)));
+#endif
     }
 
     DxvkScInfo              sc;

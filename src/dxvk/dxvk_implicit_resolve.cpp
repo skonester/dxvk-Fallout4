@@ -1,4 +1,7 @@
 #include <algorithm>
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
 
 #include "dxvk_device.h"
 #include "dxvk_implicit_resolve.h"
@@ -143,22 +146,80 @@ namespace dxvk {
     constexpr uint64_t MinLifetime =  16u;
 
     // Eliminate images that haven't been used in a long time
-    for (auto i = m_resolveViews.begin(); i != m_resolveViews.end(); ) {
-      if (i->resolveView->image()->getTrackId() + MaxLifetime < trackingId) {
-        i = m_resolveViews.erase(i);
-      } else {
-        allocationSize += i->resolveView->image()->getMemoryInfo().size;
-        i++;
+#if defined(__AVX2__)
+    size_t numViews = m_resolveViews.size();
+    if (numViews >= 4) {
+      alignas(32) uint64_t trackIds[4];
+      for (size_t i = 0; i < 4; ++i) {
+        trackIds[i] = m_resolveViews[i].resolveView->image()->getTrackId() + MaxLifetime;
       }
+      __m256i v_trackIds = _mm256_load_si256(reinterpret_cast<const __m256i*>(trackIds));
+      __m256i v_trackingId = _mm256_set1_epi64x(int64_t(trackingId));
+      __m256i cmp = _mm256_cmpgt_epi64(v_trackingId, v_trackIds);
+      uint32_t mask = uint32_t(_mm256_movemask_epi8(cmp));
+
+      if (mask) {
+        for (auto i = m_resolveViews.begin(); i != m_resolveViews.end(); ) {
+          if (i->resolveView->image()->getTrackId() + MaxLifetime < trackingId) {
+            i = m_resolveViews.erase(i);
+          } else {
+            allocationSize += i->resolveView->image()->getMemoryInfo().size;
+            i++;
+          }
+        }
+      } else {
+        for (size_t i = 0; i < 4; ++i)
+          allocationSize += m_resolveViews[i].resolveView->image()->getMemoryInfo().size;
+
+        for (auto i = m_resolveViews.begin() + 4; i != m_resolveViews.end(); ) {
+          if (i->resolveView->image()->getTrackId() + MaxLifetime < trackingId) {
+            i = m_resolveViews.erase(i);
+          } else {
+            allocationSize += i->resolveView->image()->getMemoryInfo().size;
+            i++;
+          }
+        }
+      }
+    } else {
+#endif
+      for (auto i = m_resolveViews.begin(); i != m_resolveViews.end(); ) {
+        if (i->resolveView->image()->getTrackId() + MaxLifetime < trackingId) {
+          i = m_resolveViews.erase(i);
+        } else {
+          allocationSize += i->resolveView->image()->getMemoryInfo().size;
+          i++;
+        }
+      }
+#if defined(__AVX2__)
     }
+#endif
 
     // If we're using a large amount of memory for resolve images, eliminate
     // the least recently used resolve images until we drop below the size
     // threshold again.
     while (allocationSize > MaxMemory) {
       auto lr = m_resolveViews.end();
+      size_t startIndex = 0;
 
-      for (auto i = m_resolveViews.begin(); i != m_resolveViews.end(); i++) {
+#if defined(__AVX2__)
+      size_t currentViews = m_resolveViews.size();
+      if (currentViews >= 4) {
+        alignas(32) uint64_t trackIds[4];
+        for (size_t i = 0; i < 4; ++i) {
+          trackIds[i] = m_resolveViews[i].resolveView->image()->getTrackId() + MinLifetime;
+        }
+        __m256i v_trackIds = _mm256_load_si256(reinterpret_cast<const __m256i*>(trackIds));
+        __m256i v_trackingId = _mm256_set1_epi64x(int64_t(trackingId));
+        __m256i cmp = _mm256_cmpgt_epi64(v_trackingId, v_trackIds);
+        uint32_t mask = uint32_t(_mm256_movemask_epi8(cmp));
+
+        if (mask == 0) {
+          startIndex = 4;
+        }
+      }
+#endif
+
+      for (auto i = m_resolveViews.begin() + startIndex; i != m_resolveViews.end(); i++) {
         if (i->resolveView->image()->getTrackId() + MinLifetime < trackingId) {
           if (lr == m_resolveViews.end()
            || lr->resolveView->image()->getTrackId() > i->resolveView->image()->getTrackId())

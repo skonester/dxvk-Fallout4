@@ -264,6 +264,41 @@ namespace dxvk::bit {
   bool bcmpeq(const T* a, const T* b) {
     static_assert(alignof(T) >= 16);
     #if defined(DXVK_ARCH_X86) && (defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER))
+    #if defined(__AVX2__)
+    auto ai = reinterpret_cast<const __m256i*>(a);
+    auto bi = reinterpret_cast<const __m256i*>(b);
+
+    size_t i = 0;
+
+    #if defined(__clang__)
+    #pragma nounroll
+    #elif defined(__GNUC__)
+    #pragma GCC unroll 0
+    #endif
+
+    for ( ; i < sizeof(T) / 32; i++) {
+      __m256i eq = _mm256_cmpeq_epi8(
+        _mm256_loadu_si256(ai + i),
+        _mm256_loadu_si256(bi + i));
+
+      int mask = _mm256_movemask_epi8(eq);
+      if (mask != -1)
+        return false;
+    }
+
+    if constexpr ((sizeof(T) % 32) >= 16) {
+      auto ai16 = reinterpret_cast<const __m128i*>(ai + i);
+      auto bi16 = reinterpret_cast<const __m128i*>(bi + i);
+      __m128i eq = _mm_cmpeq_epi8(
+        _mm_loadu_si128(ai16),
+        _mm_loadu_si128(bi16));
+      int mask = _mm_movemask_epi8(eq);
+      if (mask != 0xFFFF)
+        return false;
+    }
+
+    return true;
+    #else
     auto ai = reinterpret_cast<const __m128i*>(a);
     auto bi = reinterpret_cast<const __m128i*>(b);
 
@@ -300,6 +335,7 @@ namespace dxvk::bit {
     }
 
     return true;
+    #endif
     #else
     return !std::memcmp(a, b, sizeof(T));
     #endif

@@ -239,6 +239,82 @@ namespace dxvk {
   static_assert(sizeof(Vector4)  == sizeof(float) * 4);
   static_assert(sizeof(Vector4i) == sizeof(int)   * 4);
 
+  #if defined(__AVX2__)
+  struct Vector4x2 {
+    Vector4x2()
+    : value(_mm256_setzero_ps()) {
+
+    }
+
+    explicit Vector4x2(__m256 value)
+    : value(value) {
+
+    }
+
+    Vector4x2(const Vector4& lo, const Vector4& hi)
+    : value(_mm256_set_m128(_mm_loadu_ps(hi.data), _mm_loadu_ps(lo.data))) {
+
+    }
+
+    static Vector4x2 load(const Vector4* vectors) {
+      return Vector4x2(_mm256_loadu_ps(reinterpret_cast<const float*>(vectors)));
+    }
+
+    void store(Vector4* vectors) const {
+      _mm256_storeu_ps(reinterpret_cast<float*>(vectors), value);
+    }
+
+    Vector4 lo() const {
+      Vector4 result;
+      _mm_storeu_ps(result.data, _mm256_castps256_ps128(value));
+      return result;
+    }
+
+    Vector4 hi() const {
+      Vector4 result;
+      _mm_storeu_ps(result.data, _mm256_extractf128_ps(value, 1));
+      return result;
+    }
+
+    Vector4x2 operator+(const Vector4x2& other) const {
+      return Vector4x2(_mm256_add_ps(value, other.value));
+    }
+
+    Vector4x2 operator-(const Vector4x2& other) const {
+      return Vector4x2(_mm256_sub_ps(value, other.value));
+    }
+
+    Vector4x2 operator*(const Vector4x2& other) const {
+      return Vector4x2(_mm256_mul_ps(value, other.value));
+    }
+
+    Vector4x2 operator*(float scalar) const {
+      return Vector4x2(_mm256_mul_ps(value, _mm256_set1_ps(scalar)));
+    }
+
+    Vector4x2& operator+=(const Vector4x2& other) {
+      value = _mm256_add_ps(value, other.value);
+      return *this;
+    }
+
+    Vector4x2& operator-=(const Vector4x2& other) {
+      value = _mm256_sub_ps(value, other.value);
+      return *this;
+    }
+
+    Vector4x2& operator*=(float scalar) {
+      value = _mm256_mul_ps(value, _mm256_set1_ps(scalar));
+      return *this;
+    }
+
+    __m256 value;
+  };
+
+  inline Vector4x2 operator*(float scalar, const Vector4x2& vector) {
+    return vector * scalar;
+  }
+  #endif
+
   inline Vector4 replaceNaN(Vector4 a) {
     #ifdef DXVK_ARCH_X86
     Vector4 result;

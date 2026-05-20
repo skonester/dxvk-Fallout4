@@ -6,7 +6,30 @@
 #include "../util/util_bit.h"
 #include "../util/util_likely.h"
 
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
+
 namespace dxvk {
+
+#if defined(__AVX2__)
+  namespace {
+
+    void fillPageMaskWords(uint32_t* dst, uint32_t count, uint32_t value) {
+      const __m256i values = _mm256_set1_epi32(int32_t(value));
+
+      while (count >= 8u) {
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(dst), values);
+        dst += 8u;
+        count -= 8u;
+      }
+
+      while (count--)
+        *dst++ = value;
+    }
+
+  }
+#endif
 
   DxvkPageAllocator::DxvkPageAllocator() {
 
@@ -228,8 +251,12 @@ namespace dxvk {
     uint32_t fullCount = chunk.pageCount / 32u;
     uint32_t lastCount = chunk.pageCount % 32u;
 
+#if defined(__AVX2__)
+    fillPageMaskWords(pageMask, fullCount, ~0u);
+#else
     for (uint32_t i = 0; i < fullCount; i++)
       pageMask[i] = ~0u;
+#endif
 
     if (lastCount)
       pageMask[fullCount] = (1u << lastCount) - 1u;
@@ -254,9 +281,17 @@ namespace dxvk {
           range.count -= 32u - shift;
         }
 
-        while (range.count >= 32u) {
-          pageMask[index++] = 0u;
-          range.count -= 32u;
+        uint32_t wordCount = range.count / 32u;
+
+        if (wordCount) {
+#if defined(__AVX2__)
+          fillPageMaskWords(pageMask + index, wordCount, 0u);
+#else
+          for (uint32_t i = 0; i < wordCount; i++)
+            pageMask[index + i] = 0u;
+#endif
+          index += wordCount;
+          range.count -= wordCount * 32u;
         }
 
         if (range.count)

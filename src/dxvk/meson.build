@@ -29,12 +29,10 @@ dxvk_shaders = files([
 dxvk_src = [
   'dxvk_access.cpp',
   'dxvk_adapter.cpp',
-  'dxvk_allocator.cpp',
   'dxvk_barrier.cpp',
   'dxvk_buffer.cpp',
   'dxvk_cmdlist.cpp',
   'dxvk_compute.cpp',
-  'dxvk_constant_state.cpp',
   'dxvk_context.cpp',
   'dxvk_cs.cpp',
   'dxvk_descriptor_heap.cpp',
@@ -72,15 +70,12 @@ dxvk_src = [
   'dxvk_shader_cache.cpp',
   'dxvk_shader_io.cpp',
   'dxvk_shader_ir.cpp',
-  'dxvk_shader_key.cpp',
   'dxvk_shader_spirv.cpp',
   'dxvk_signal.cpp',
   'dxvk_sparse.cpp',
   'dxvk_staging.cpp',
-  'dxvk_stats.cpp',
   'dxvk_swapchain_blitter.cpp',
   'dxvk_unbound.cpp',
-  'dxvk_util.cpp',
 
   'hud/dxvk_hud.cpp',
   'hud/dxvk_hud_font.cpp',
@@ -103,6 +98,20 @@ endif
 dxvk_link_libs = [ util_lib, spirv_lib, wsi_lib ]
 
 if get_option('dxvk_experimental_simd')
+  dxvk_allocator_lib = static_library('dxvk_allocator_simd', files('dxvk_allocator.cpp'),
+    dependencies        : [ dxbc_spirv_dep, vkcommon_dep ] + dxvk_extra_deps,
+    include_directories : [ dxvk_include_path ],
+    link_with           : dxvk_link_libs,
+    cpp_args            : dxvk_experimental_simd_args,
+  )
+
+  dxvk_constant_state_lib = static_library('dxvk_constant_state_simd', files('dxvk_constant_state.cpp'),
+    dependencies        : [ dxbc_spirv_dep, vkcommon_dep ] + dxvk_extra_deps,
+    include_directories : [ dxvk_include_path ],
+    link_with           : dxvk_link_libs,
+    cpp_args            : dxvk_experimental_simd_args,
+  )
+
   dxvk_descriptor_info_lib = static_library('dxvk_descriptor_info_simd', files('dxvk_descriptor_info.cpp'),
     dependencies        : [ dxbc_spirv_dep, vkcommon_dep ] + dxvk_extra_deps,
     include_directories : [ dxvk_include_path ],
@@ -110,9 +119,30 @@ if get_option('dxvk_experimental_simd')
     cpp_args            : dxvk_experimental_simd_args,
   )
 
-  dxvk_link_libs += [ dxvk_descriptor_info_lib ]
+  dxvk_util_lib = static_library('dxvk_util_simd', files('dxvk_util.cpp'),
+    dependencies        : [ dxbc_spirv_dep, vkcommon_dep ] + dxvk_extra_deps,
+    include_directories : [ dxvk_include_path ],
+    link_with           : dxvk_link_libs,
+    cpp_args            : dxvk_experimental_simd_args,
+  )
+
+  dxvk_stats_lib = static_library('dxvk_stats_simd', files('dxvk_stats.cpp'),
+    dependencies        : [ dxbc_spirv_dep, vkcommon_dep ] + dxvk_extra_deps,
+    include_directories : [ dxvk_include_path ],
+    link_with           : dxvk_link_libs,
+    cpp_args            : dxvk_experimental_simd_args,
+  )
+
+  dxvk_shader_key_lib = static_library('dxvk_shader_key_simd', files('dxvk_shader_key.cpp'),
+    dependencies        : [ dxbc_spirv_dep, vkcommon_dep ] + dxvk_extra_deps,
+    include_directories : [ dxvk_include_path ],
+    link_with           : dxvk_link_libs,
+    cpp_args            : dxvk_experimental_simd_args,
+  )
+
+  dxvk_link_libs += [ dxvk_allocator_lib, dxvk_constant_state_lib, dxvk_descriptor_info_lib, dxvk_util_lib, dxvk_stats_lib, dxvk_shader_key_lib ]
 else
-  dxvk_src += [ 'dxvk_descriptor_info.cpp' ]
+  dxvk_src += [ 'dxvk_allocator.cpp', 'dxvk_constant_state.cpp', 'dxvk_descriptor_info.cpp', 'dxvk_util.cpp', 'dxvk_stats.cpp', 'dxvk_shader_key.cpp' ]
 endif
 
 dxvk_lib = static_library('dxvk', dxvk_src, glsl_generator.process(dxvk_shaders), dxvk_version,

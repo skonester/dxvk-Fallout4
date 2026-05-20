@@ -1,5 +1,9 @@
 #include "spirv_compression.h"
 
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
+
 namespace dxvk {
 
   SpirvCompressedBuffer::SpirvCompressedBuffer()
@@ -93,6 +97,85 @@ namespace dxvk {
     uint32_t srcOffset = 0;
     uint32_t dstOffset = 0;
 
+#if defined(__AVX2__)
+    const __m256i shift_schema_vec0 = _mm256_setr_epi32(0, 2, 4, 6, 8, 10, 12, 14);
+    const __m256i shift_schema_vec1 = _mm256_setr_epi32(16, 18, 20, 22, 24, 26, 28, 30);
+    const __m256i mask_table = _mm256_setr_epi32(
+      0xffffffff, // schema 0
+      0x000fffff, // schema 1
+      0x0000ffff, // schema 2
+      0x00000fff, // schema 3
+      0, 0, 0, 0
+    );
+    const __m256i shift_table = _mm256_setr_epi32(
+      0,  // schema 0
+      20, // schema 1
+      16, // schema 2
+      12, // schema 3
+      0, 0, 0, 0
+    );
+    const __m256i three = _mm256_set1_epi32(3);
+
+    while (srcOffset + 17 <= m_code.size() && dstOffset + 32 <= m_size) {
+      uint32_t blockMask = m_code[srcOffset];
+      uint32_t schemaBits = blockMask | (blockMask >> 1);
+
+      if ((schemaBits & 0x55555555u) != 0x55555555u)
+        break;
+
+      // Part 1: i = 0..7
+      {
+        __m256i encode_vec = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&m_code[srcOffset + 1]));
+        __m256i mask_broad = _mm256_set1_epi32(blockMask);
+        __m256i shifted = _mm256_srlv_epi32(mask_broad, shift_schema_vec0);
+        __m256i schema_vec = _mm256_and_si256(shifted, three);
+
+        __m256i mask_vec = _mm256_permutevar8x32_epi32(mask_table, schema_vec);
+        __m256i shift_vec = _mm256_permutevar8x32_epi32(shift_table, schema_vec);
+
+        __m256i val_a = _mm256_and_si256(encode_vec, mask_vec);
+        __m256i val_b = _mm256_srlv_epi32(encode_vec, shift_vec);
+
+        alignas(32) uint32_t val_a_arr[8];
+        alignas(32) uint32_t val_b_arr[8];
+        _mm256_store_si256(reinterpret_cast<__m256i*>(val_a_arr), val_a);
+        _mm256_store_si256(reinterpret_cast<__m256i*>(val_b_arr), val_b);
+
+        for (int i = 0; i < 8; i++) {
+          data[dstOffset + 2 * i + 0] = val_a_arr[i];
+          data[dstOffset + 2 * i + 1] = val_b_arr[i];
+        }
+      }
+
+      // Part 2: i = 8..15
+      {
+        __m256i encode_vec = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&m_code[srcOffset + 9]));
+        __m256i mask_broad = _mm256_set1_epi32(blockMask);
+        __m256i shifted = _mm256_srlv_epi32(mask_broad, shift_schema_vec1);
+        __m256i schema_vec = _mm256_and_si256(shifted, three);
+
+        __m256i mask_vec = _mm256_permutevar8x32_epi32(mask_table, schema_vec);
+        __m256i shift_vec = _mm256_permutevar8x32_epi32(shift_table, schema_vec);
+
+        __m256i val_a = _mm256_and_si256(encode_vec, mask_vec);
+        __m256i val_b = _mm256_srlv_epi32(encode_vec, shift_vec);
+
+        alignas(32) uint32_t val_a_arr[8];
+        alignas(32) uint32_t val_b_arr[8];
+        _mm256_store_si256(reinterpret_cast<__m256i*>(val_a_arr), val_a);
+        _mm256_store_si256(reinterpret_cast<__m256i*>(val_b_arr), val_b);
+
+        for (int i = 0; i < 8; i++) {
+          data[dstOffset + 16 + 2 * i + 0] = val_a_arr[i];
+          data[dstOffset + 16 + 2 * i + 1] = val_b_arr[i];
+        }
+      }
+
+      dstOffset += 32;
+      srcOffset += 17;
+    }
+#endif
+
     constexpr uint32_t shiftAmounts = 0x0c101420;
 
     while (dstOffset < m_size) {
@@ -108,8 +191,11 @@ namespace dxvk {
 
         data[dstOffset] = encode & mask;
 
-        if (likely(schema))
-          data[dstOffset + 1] = encode >> shift;
+        if (likely(schema)) {
+          if (likely(dstOffset + 1 < m_size)) {
+            data[dstOffset + 1] = encode >> shift;
+          }
+        }
 
         dstOffset += schema ? 2 : 1;
       }

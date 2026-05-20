@@ -311,11 +311,17 @@ namespace dxvk {
 
     size_t hash() const {
       DxvkHashState state;
-      state.add(DxvkShader::getCookie(vs));
-      state.add(DxvkShader::getCookie(tcs));
-      state.add(DxvkShader::getCookie(tes));
-      state.add(DxvkShader::getCookie(gs));
-      state.add(DxvkShader::getCookie(fs));
+      if constexpr (sizeof(size_t) >= 8) {
+        state.add((uint64_t(DxvkShader::getCookie(vs)) << 32) | DxvkShader::getCookie(tcs));
+        state.add((uint64_t(DxvkShader::getCookie(tes)) << 32) | DxvkShader::getCookie(gs));
+        state.add(DxvkShader::getCookie(fs));
+      } else {
+        state.add(DxvkShader::getCookie(vs));
+        state.add(DxvkShader::getCookie(tcs));
+        state.add(DxvkShader::getCookie(tes));
+        state.add(DxvkShader::getCookie(gs));
+        state.add(DxvkShader::getCookie(fs));
+      }
       return state;
     }
 

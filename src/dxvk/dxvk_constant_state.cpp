@@ -1,6 +1,68 @@
 #include "dxvk_constant_state.h"
 
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
+
 namespace dxvk {
+
+  namespace {
+
+    struct DxvkBlendNormalizeFlags {
+      bool colorNoOp;
+      bool alphaNoOp;
+      bool colorPassThrough;
+      bool alphaPassThrough;
+    };
+
+    DxvkBlendNormalizeFlags getBlendNormalizeFlags(
+            VkBlendFactor colorSrcFactor,
+            VkBlendFactor colorDstFactor,
+            VkBlendOp     colorBlendOp,
+            VkBlendFactor alphaSrcFactor,
+            VkBlendFactor alphaDstFactor,
+            VkBlendOp     alphaBlendOp) {
+#if defined(__AVX2__)
+      const __m256i ops = _mm256_setr_epi32(
+        int32_t(colorSrcFactor), int32_t(colorDstFactor), int32_t(colorBlendOp), 0,
+        int32_t(alphaSrcFactor), int32_t(alphaDstFactor), int32_t(alphaBlendOp), 0);
+
+      const __m256i noOp = _mm256_setr_epi32(
+        VK_BLEND_FACTOR_ZERO, VK_BLEND_FACTOR_ONE, VK_BLEND_OP_ADD, 0,
+        VK_BLEND_FACTOR_ZERO, VK_BLEND_FACTOR_ONE, VK_BLEND_OP_ADD, 0);
+
+      const __m256i passThrough = _mm256_setr_epi32(
+        VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, 0,
+        VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ZERO, VK_BLEND_OP_ADD, 0);
+
+      uint32_t noOpMask = uint32_t(_mm256_movemask_ps(_mm256_castsi256_ps(_mm256_cmpeq_epi32(ops, noOp))));
+      uint32_t passThroughMask = uint32_t(_mm256_movemask_ps(_mm256_castsi256_ps(_mm256_cmpeq_epi32(ops, passThrough))));
+
+      return DxvkBlendNormalizeFlags {
+        (noOpMask & 0x7u) == 0x7u,
+        (noOpMask & 0x70u) == 0x70u,
+        (passThroughMask & 0x7u) == 0x7u,
+        (passThroughMask & 0x70u) == 0x70u,
+      };
+#else
+      return DxvkBlendNormalizeFlags {
+        colorBlendOp == VK_BLEND_OP_ADD
+          && colorSrcFactor == VK_BLEND_FACTOR_ZERO
+          && colorDstFactor == VK_BLEND_FACTOR_ONE,
+        alphaBlendOp == VK_BLEND_OP_ADD
+          && alphaSrcFactor == VK_BLEND_FACTOR_ZERO
+          && alphaDstFactor == VK_BLEND_FACTOR_ONE,
+        colorBlendOp == VK_BLEND_OP_ADD
+          && colorSrcFactor == VK_BLEND_FACTOR_ONE
+          && colorDstFactor == VK_BLEND_FACTOR_ZERO,
+        alphaBlendOp == VK_BLEND_OP_ADD
+          && alphaSrcFactor == VK_BLEND_FACTOR_ONE
+          && alphaDstFactor == VK_BLEND_FACTOR_ZERO,
+      };
+#endif
+    }
+
+  }
 
   bool DxvkStencilOp::normalize(VkCompareOp depthOp) {
     if (writeMask()) {
@@ -76,33 +138,27 @@ namespace dxvk {
       setBlendEnable(false);
 
     if (blendEnable()) {
+      DxvkBlendNormalizeFlags flags = getBlendNormalizeFlags(
+        colorSrcFactor(), colorDstFactor(), colorBlendOp(),
+        alphaSrcFactor(), alphaDstFactor(), alphaBlendOp());
+
       // If alpha or color are effectively not modified given the blend
       // function, set the corresponding part of the write mask to 0.
-      if (colorBlendOp() == VK_BLEND_OP_ADD
-       && colorSrcFactor() == VK_BLEND_FACTOR_ZERO
-       && colorDstFactor() == VK_BLEND_FACTOR_ONE)
+      if (flags.colorNoOp)
         newWriteMask &= ~colorMask;
 
-      if (alphaBlendOp() == VK_BLEND_OP_ADD
-       && alphaSrcFactor() == VK_BLEND_FACTOR_ZERO
-       && alphaDstFactor() == VK_BLEND_FACTOR_ONE)
+      if (flags.alphaNoOp)
         newWriteMask &= ~alphaMask;
 
       // Check whether blending is equivalent to passing through
       // the source data as if blending was disabled.
       bool needsBlending = false;
 
-      if (newWriteMask & colorMask) {
-        needsBlending |= colorSrcFactor() != VK_BLEND_FACTOR_ONE
-                      || colorDstFactor() != VK_BLEND_FACTOR_ZERO
-                      || colorBlendOp()   != VK_BLEND_OP_ADD;
-      }
+      if (newWriteMask & colorMask)
+        needsBlending |= !flags.colorPassThrough;
 
-      if (newWriteMask & alphaMask) {
-        needsBlending |= alphaSrcFactor() != VK_BLEND_FACTOR_ONE
-                      || alphaDstFactor() != VK_BLEND_FACTOR_ZERO
-                      || alphaBlendOp()   != VK_BLEND_OP_ADD;
-      }
+      if (newWriteMask & alphaMask)
+        needsBlending |= !flags.alphaPassThrough;
 
       if (!needsBlending)
         setBlendEnable(false);

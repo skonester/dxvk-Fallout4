@@ -60,7 +60,7 @@ namespace dxvk {
 
   template<size_t Size>
   static force_inline void clear_nontemporal(void* dst) {
-    static_assert(Size == 4u || Size == 8u || Size == 16u);
+    static_assert(Size == 4u || Size == 8u || Size == 16u || Size == 32u);
 
     #if defined(DXVK_ARCH_X86) && (defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER))
     switch (Size) {
@@ -83,6 +83,15 @@ namespace dxvk {
       case 16u: {
         auto dstPtr = reinterpret_cast<__m128i*>(dst);
         _mm_stream_si128(dstPtr, _mm_setzero_si128());
+      } break;
+
+      case 32u: {
+        #if defined(__AVX2__)
+        auto dstPtr = reinterpret_cast<__m256i*>(dst);
+        _mm256_stream_si256(dstPtr, _mm256_setzero_si256());
+        #else
+        std::memset(dst, 0, Size);
+        #endif
       } break;
     }
     #else
@@ -335,17 +344,28 @@ namespace dxvk {
     const DxvkDescriptorUpdateRange&  range) {
     auto dstPtr = reinterpret_cast<char*>(dst) + range.dstOffset;
 
-    if (Size & 4u) {
+    size_t Remainder = Size;
+    #if defined(__AVX2__)
+    if (reinterpret_cast<uintptr_t>(dstPtr) % 32u == 0) {
+      for (size_t i = 0u; i < Size / 32u; i++) {
+        clear_nontemporal<32u>(dstPtr);
+        dstPtr += 32u;
+      }
+      Remainder = Size % 32u;
+    }
+    #endif
+
+    if (Remainder & 4u) {
       clear_nontemporal<4u>(dstPtr);
       dstPtr += 4u;
     }
 
-    if (Size & 8u) {
+    if (Remainder & 8u) {
       clear_nontemporal<8u>(dstPtr);
       dstPtr += 8u;
     }
 
-    for (size_t i = 0u; i < Size / 16u; i++)
+    for (size_t i = 0u; i < Remainder / 16u; i++)
       clear_nontemporal<16u>(dstPtr + 16u * i);
   }
 
@@ -356,17 +376,28 @@ namespace dxvk {
     const DxvkDescriptorUpdateRange&  range) {
     auto dstPtr = reinterpret_cast<char*>(dst) + range.dstOffset;
 
-    if (range.descriptorSize & 4u) {
+    size_t Remainder = range.descriptorSize;
+    #if defined(__AVX2__)
+    if (reinterpret_cast<uintptr_t>(dstPtr) % 32u == 0) {
+      for (size_t i = 0u; i < range.descriptorSize / 32u; i++) {
+        clear_nontemporal<32u>(dstPtr);
+        dstPtr += 32u;
+      }
+      Remainder = range.descriptorSize % 32u;
+    }
+    #endif
+
+    if (Remainder & 4u) {
       clear_nontemporal<4u>(dstPtr);
       dstPtr += 4u;
     }
 
-    if (range.descriptorSize & 8u) {
+    if (Remainder & 8u) {
       clear_nontemporal<8u>(dstPtr);
       dstPtr += 8u;
     }
 
-    for (size_t i = 0u; i < range.descriptorSize / 16u; i++)
+    for (size_t i = 0u; i < Remainder / 16u; i++)
       clear_nontemporal<16u>(dstPtr + 16u * i);
   }
 
