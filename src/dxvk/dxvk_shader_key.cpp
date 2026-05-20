@@ -1,5 +1,3 @@
-#include <cstring>
-#include "../util/util_bit.h"
 #include "dxvk_shader_key.h"
 
 namespace dxvk {
@@ -71,18 +69,6 @@ namespace dxvk {
 
 
   bool DxvkShaderHash::eq(const DxvkShaderHash& other) const {
-#if defined(DXVK_ARCH_X86)
-    uint64_t a_header, b_header;
-    std::memcpy(&a_header, this, sizeof(uint64_t));
-    std::memcpy(&b_header, &other, sizeof(uint64_t));
-    if (a_header != b_header)
-      return false;
-
-    __m128i h0 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(m_hash.data()));
-    __m128i h1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(other.m_hash.data()));
-    __m128i cmp = _mm_cmpeq_epi32(h0, h1);
-    return _mm_movemask_epi8(cmp) == 0xffff;
-#else
     bool eq = m_stage == other.m_stage
            && m_xfb == other.m_xfb
            && m_size == other.m_size;
@@ -91,13 +77,19 @@ namespace dxvk {
       eq = eq && m_hash[i] == other.m_hash[i];
 
     return eq;
-#endif
   }
 
 
   size_t DxvkShaderHash::hash() const {
-    return size_t(bit::crc32_hash(
-      reinterpret_cast<const unsigned char*>(this), sizeof(*this)));
+    DxvkHashState hash = { };
+    hash.add(m_stage);
+    hash.add(m_xfb);
+    hash.add(m_size);
+
+    for (auto dw : m_hash)
+      hash.add(dw);
+
+    return hash;
   }
 
 

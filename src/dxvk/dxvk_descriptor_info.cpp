@@ -5,15 +5,11 @@
 
 #include "../util/util_bit.h"
 
-#if defined(__AVX2__)
-#include <immintrin.h>
-#endif
-
 namespace dxvk {
 
   template<size_t Size>
   static force_inline void copy_nontemporal(void* dst, const void* src) {
-    static_assert(Size == 4u || Size == 8u || Size == 16u || Size == 32u);
+    static_assert(Size == 4u || Size == 8u || Size == 16u);
 
     #if defined(DXVK_ARCH_X86) && (defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER))
     switch (Size) {
@@ -41,19 +37,6 @@ namespace dxvk {
         auto srcPtr = reinterpret_cast<const __m128i*>(src);
         _mm_stream_si128(dstPtr, _mm_loadu_si128(srcPtr));
       } break;
-
-      case 32u: {
-        #if defined(__AVX2__)
-        auto dstPtr = reinterpret_cast<      __m256i*>(dst);
-        auto srcPtr = reinterpret_cast<const __m256i*>(src);
-        _mm256_stream_si256(dstPtr, _mm256_loadu_si256(srcPtr));
-        #else
-        auto dstPtr = reinterpret_cast<      __m128i*>(dst);
-        auto srcPtr = reinterpret_cast<const __m128i*>(src);
-        _mm_stream_si128(dstPtr + 0u, _mm_loadu_si128(srcPtr + 0u));
-        _mm_stream_si128(dstPtr + 1u, _mm_loadu_si128(srcPtr + 1u));
-        #endif
-      } break;
     }
     #else
     std::memcpy(dst, src, Size);
@@ -63,7 +46,7 @@ namespace dxvk {
 
   template<size_t Size>
   static force_inline void clear_nontemporal(void* dst) {
-    static_assert(Size == 4u || Size == 8u || Size == 16u || Size == 32u);
+    static_assert(Size == 4u || Size == 8u || Size == 16u);
 
     #if defined(DXVK_ARCH_X86) && (defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER))
     switch (Size) {
@@ -86,17 +69,6 @@ namespace dxvk {
       case 16u: {
         auto dstPtr = reinterpret_cast<__m128i*>(dst);
         _mm_stream_si128(dstPtr, _mm_setzero_si128());
-      } break;
-
-      case 32u: {
-        #if defined(__AVX2__)
-        auto dstPtr = reinterpret_cast<__m256i*>(dst);
-        _mm256_stream_si256(dstPtr, _mm256_setzero_si256());
-        #else
-        auto dstPtr = reinterpret_cast<__m128i*>(dst);
-        _mm_stream_si128(dstPtr + 0u, _mm_setzero_si128());
-        _mm_stream_si128(dstPtr + 1u, _mm_setzero_si128());
-        #endif
       } break;
     }
     #else
@@ -284,25 +256,11 @@ namespace dxvk {
     for (uint32_t i = 0u; i < range.descriptorCount; i++) {
       auto srcPtr = reinterpret_cast<const char*>(srcBase[i]->descriptor.data());
 
-      #if defined(__AVX2__)
-      for (size_t i = 0u; i < Size / 32u; i++)
-        copy_nontemporal<32u>(dstPtr + 32u * i, srcPtr + 32u * i);
-
-      dstPtr += 32u * (Size / 32u);
-      srcPtr += 32u * (Size / 32u);
-
-      if constexpr ((Size % 32u) >= 16u) {
-        copy_nontemporal<16u>(dstPtr, srcPtr);
-        dstPtr += 16u;
-        srcPtr += 16u;
-      }
-      #else
       for (size_t i = 0u; i < Size / 16u; i++)
         copy_nontemporal<16u>(dstPtr + 16u * i, srcPtr + 16u * i);
 
       dstPtr += 16u * (Size / 16u);
       srcPtr += 16u * (Size / 16u);
-      #endif
 
       if (Size & 8u) {
         copy_nontemporal<8u>(dstPtr, srcPtr);
@@ -337,17 +295,8 @@ namespace dxvk {
       dstPtr += 8u;
     }
 
-    #if defined(__AVX2__)
-    for (size_t i = 0u; i < Size / 32u; i++)
-      clear_nontemporal<32u>(dstPtr + 32u * i);
-
-    if constexpr ((Size % 32u) >= 16u) {
-      clear_nontemporal<16u>(dstPtr + 32u * (Size / 32u));
-    }
-    #else
     for (size_t i = 0u; i < Size / 16u; i++)
       clear_nontemporal<16u>(dstPtr + 16u * i);
-    #endif
   }
 
 
@@ -367,17 +316,8 @@ namespace dxvk {
       dstPtr += 8u;
     }
 
-    #if defined(__AVX2__)
-    for (size_t i = 0u; i < range.descriptorSize / 32u; i++)
-      clear_nontemporal<32u>(dstPtr + 32u * i);
-
-    if ((range.descriptorSize % 32u) >= 16u) {
-      clear_nontemporal<16u>(dstPtr + 32u * (range.descriptorSize / 32u));
-    }
-    #else
     for (size_t i = 0u; i < range.descriptorSize / 16u; i++)
       clear_nontemporal<16u>(dstPtr + 16u * i);
-    #endif
   }
 
 

@@ -27,21 +27,22 @@ namespace dxvk {
 
 
   bool DxvkDescriptorSetLayoutKey::eq(const DxvkDescriptorSetLayoutKey& other) const {
-    if (m_bindings.size() != other.m_bindings.size())
-      return false;
-    if (m_bindings.empty())
-      return true;
-    return std::memcmp(m_bindings.data(), other.m_bindings.data(),
-                       m_bindings.size() * sizeof(DxvkDescriptorSetLayoutBinding)) == 0;
+    bool eq = m_bindings.size() == other.m_bindings.size();
+
+    for (size_t i = 0; i < m_bindings.size() && eq; i++)
+      eq = m_bindings[i].eq(other.m_bindings[i]);
+
+    return eq;
   }
 
 
   size_t DxvkDescriptorSetLayoutKey::hash() const {
-    if (m_bindings.empty())
-      return 0;
-    return size_t(bit::crc32_hash(
-      reinterpret_cast<const unsigned char*>(m_bindings.data()),
-      m_bindings.size() * sizeof(DxvkDescriptorSetLayoutBinding)));
+    DxvkHashState hash;
+
+    for (size_t i = 0; i < m_bindings.size(); i++)
+      hash.add(m_bindings[i].hash());
+
+    return hash;
   }
 
 

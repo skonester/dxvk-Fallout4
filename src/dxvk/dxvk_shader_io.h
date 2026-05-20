@@ -5,8 +5,6 @@
 
 #include "../spirv/spirv_module.h"
 
-#include "../util/util_bit.h"
-
 namespace dxvk {
 
   /**
@@ -49,7 +47,7 @@ namespace dxvk {
       hash.add(uint32_t(componentCount));
       hash.add(uint32_t(isPatchConstant));
       hash.add(uint32_t(semanticIndex));
-      hash.add(bit::crc32_hash(semanticName.data(), semanticName.size()));
+      hash.add(bit::fnv1a_hash(semanticName.data(), semanticName.size()));
       return hash;
     }
   };

@@ -157,19 +157,31 @@ namespace dxvk {
            && viDivisorInfo.vertexBindingDivisorCount == other.viDivisorInfo.vertexBindingDivisorCount
            && viUseDynamicVertexStrides               == other.viUseDynamicVertexStrides;
 
-    if (eq && viInfo.vertexBindingDescriptionCount) {
-      eq = std::memcmp(viBindings.data(), other.viBindings.data(),
-                       viInfo.vertexBindingDescriptionCount * sizeof(VkVertexInputBindingDescription)) == 0;
+    for (uint32_t i = 0; i < viInfo.vertexBindingDescriptionCount && eq; i++) {
+      const auto& a = viBindings[i];
+      const auto& b = other.viBindings[i];
+
+      eq = a.binding    == b.binding
+        && a.stride     == b.stride
+        && a.inputRate  == b.inputRate;
     }
 
-    if (eq && viInfo.vertexAttributeDescriptionCount) {
-      eq = std::memcmp(viAttributes.data(), other.viAttributes.data(),
-                       viInfo.vertexAttributeDescriptionCount * sizeof(VkVertexInputAttributeDescription)) == 0;
+    for (uint32_t i = 0; i < viInfo.vertexAttributeDescriptionCount && eq; i++) {
+      const auto& a = viAttributes[i];
+      const auto& b = other.viAttributes[i];
+
+      eq = a.location   == b.location
+        && a.binding    == b.binding
+        && a.format     == b.format
+        && a.offset     == b.offset;
     }
 
-    if (eq && viDivisorInfo.vertexBindingDivisorCount) {
-      eq = std::memcmp(viDivisors.data(), other.viDivisors.data(),
-                       viDivisorInfo.vertexBindingDivisorCount * sizeof(VkVertexInputBindingDivisorDescriptionEXT)) == 0;
+    for (uint32_t i = 0; i < viDivisorInfo.vertexBindingDivisorCount; i++) {
+      const auto& a = viDivisors[i];
+      const auto& b = other.viDivisors[i];
+
+      eq = a.binding    == b.binding
+        && a.divisor    == b.divisor;
     }
 
     return eq;
@@ -178,26 +190,29 @@ namespace dxvk {
 
   size_t DxvkGraphicsPipelineVertexInputState::hash() const {
     DxvkHashState hash;
-    hash.add(uint64_t(iaInfo.topology) | (uint64_t(iaInfo.primitiveRestartEnable) << 32));
-    hash.add(uint64_t(viInfo.vertexBindingDescriptionCount) | (uint64_t(viInfo.vertexAttributeDescriptionCount) << 32));
-    hash.add(uint64_t(viDivisorInfo.vertexBindingDivisorCount) | (uint64_t(viUseDynamicVertexStrides) << 32));
+    hash.add(uint32_t(iaInfo.topology));
+    hash.add(uint32_t(iaInfo.primitiveRestartEnable));
+    hash.add(uint32_t(viInfo.vertexBindingDescriptionCount));
+    hash.add(uint32_t(viInfo.vertexAttributeDescriptionCount));
+    hash.add(uint32_t(viDivisorInfo.vertexBindingDivisorCount));
+    hash.add(uint32_t(viUseDynamicVertexStrides));
 
-    if (viInfo.vertexBindingDescriptionCount) {
-      hash.add(bit::crc32_hash(
-        reinterpret_cast<const unsigned char*>(viBindings.data()),
-        viInfo.vertexBindingDescriptionCount * sizeof(VkVertexInputBindingDescription)));
+    for (uint32_t i = 0; i < viInfo.vertexBindingDescriptionCount; i++) {
+      hash.add(uint32_t(viBindings[i].binding));
+      hash.add(uint32_t(viBindings[i].stride));
+      hash.add(uint32_t(viBindings[i].inputRate));
     }
 
-    if (viInfo.vertexAttributeDescriptionCount) {
-      hash.add(bit::crc32_hash(
-        reinterpret_cast<const unsigned char*>(viAttributes.data()),
-        viInfo.vertexAttributeDescriptionCount * sizeof(VkVertexInputAttributeDescription)));
+    for (uint32_t i = 0; i < viInfo.vertexAttributeDescriptionCount; i++) {
+      hash.add(uint32_t(viAttributes[i].location));
+      hash.add(uint32_t(viAttributes[i].binding));
+      hash.add(uint32_t(viAttributes[i].format));
+      hash.add(uint32_t(viAttributes[i].offset));
     }
 
-    if (viDivisorInfo.vertexBindingDivisorCount) {
-      hash.add(bit::crc32_hash(
-        reinterpret_cast<const unsigned char*>(viDivisors.data()),
-        viDivisorInfo.vertexBindingDivisorCount * sizeof(VkVertexInputBindingDivisorDescriptionEXT)));
+    for (uint32_t i = 0; i < viDivisorInfo.vertexBindingDivisorCount; i++) {
+      hash.add(uint32_t(viDivisors[i].binding));
+      hash.add(uint32_t(viDivisors[i].divisor));
     }
 
     return hash;
@@ -381,20 +396,23 @@ namespace dxvk {
            && cbUseDynamicAlphaToCoverage     == other.cbUseDynamicAlphaToCoverage
            && feedbackLoop                    == other.feedbackLoop;
 
-    if (eq && rtInfo.colorAttachmentCount) {
-      eq = std::memcmp(rtColorFormats.data(), other.rtColorFormats.data(),
-                       rtInfo.colorAttachmentCount * sizeof(VkFormat)) == 0;
-    }
+    for (uint32_t i = 0; i < rtInfo.colorAttachmentCount && eq; i++)
+      eq = rtColorFormats[i] == other.rtColorFormats[i];
 
     for (uint32_t i = 0; i < cbInfo.attachmentCount && eq; i++) {
       const auto& a = cbAttachments[i];
       const auto& b = other.cbAttachments[i];
 
-      if (a.blendEnable) {
-        eq = std::memcmp(&a, &b, sizeof(VkPipelineColorBlendAttachmentState)) == 0;
-      } else {
-        eq = a.blendEnable    == b.blendEnable
-          && a.colorWriteMask == b.colorWriteMask;
+      eq = a.blendEnable    == b.blendEnable
+        && a.colorWriteMask == b.colorWriteMask;
+
+      if (a.blendEnable && eq) {
+        eq = a.srcColorBlendFactor == b.srcColorBlendFactor
+          && a.dstColorBlendFactor == b.dstColorBlendFactor
+          && a.colorBlendOp        == b.colorBlendOp
+          && a.srcAlphaBlendFactor == b.srcAlphaBlendFactor
+          && a.dstAlphaBlendFactor == b.dstAlphaBlendFactor
+          && a.alphaBlendOp        == b.alphaBlendOp;
       }
     }
 
@@ -404,28 +422,34 @@ namespace dxvk {
 
   size_t DxvkGraphicsPipelineFragmentOutputState::hash() const {
     DxvkHashState hash;
-    hash.add(uint64_t(rtInfo.colorAttachmentCount) | (uint64_t(rtInfo.depthAttachmentFormat) << 32));
-    hash.add(uint64_t(rtInfo.stencilAttachmentFormat) | (uint64_t(cbInfo.logicOpEnable) << 32));
-    hash.add(uint64_t(cbInfo.logicOp) | (uint64_t(cbInfo.attachmentCount) << 32));
-    hash.add(uint64_t(msInfo.rasterizationSamples) | (uint64_t(msInfo.alphaToCoverageEnable) << 32));
-    hash.add(uint64_t(msInfo.alphaToOneEnable) | (uint64_t(msSampleMask) << 32));
-    hash.add(uint64_t(cbUseDynamicBlendConstants) | (uint64_t(cbUseDynamicAlphaToCoverage) << 32));
-    hash.add(uint64_t(feedbackLoop));
+    hash.add(uint32_t(rtInfo.colorAttachmentCount));
+    hash.add(uint32_t(rtInfo.depthAttachmentFormat));
+    hash.add(uint32_t(rtInfo.stencilAttachmentFormat));
+    hash.add(uint32_t(cbInfo.logicOpEnable));
+    hash.add(uint32_t(cbInfo.logicOp));
+    hash.add(uint32_t(cbInfo.attachmentCount));
+    hash.add(uint32_t(msInfo.rasterizationSamples));
+    hash.add(uint32_t(msInfo.alphaToCoverageEnable));
+    hash.add(uint32_t(msInfo.alphaToOneEnable));
+    hash.add(uint32_t(msSampleMask));
+    hash.add(uint32_t(cbUseDynamicBlendConstants));
+    hash.add(uint32_t(cbUseDynamicAlphaToCoverage));
+    hash.add(uint32_t(feedbackLoop));
 
-    if (rtInfo.colorAttachmentCount) {
-      hash.add(bit::crc32_hash(
-        reinterpret_cast<const unsigned char*>(rtColorFormats.data()),
-        rtInfo.colorAttachmentCount * sizeof(VkFormat)));
-    }
+    for (uint32_t i = 0; i < rtInfo.colorAttachmentCount; i++)
+      hash.add(uint32_t(rtColorFormats[i]));
 
     for (uint32_t i = 0; i < cbInfo.attachmentCount; i++) {
-      const auto& a = cbAttachments[i];
-      if (a.blendEnable) {
-        hash.add(bit::crc32_hash(
-          reinterpret_cast<const unsigned char*>(&a),
-          sizeof(VkPipelineColorBlendAttachmentState)));
-      } else {
-        hash.add(uint64_t(a.blendEnable) | (uint64_t(a.colorWriteMask) << 32));
+      hash.add(uint32_t(cbAttachments[i].blendEnable));
+      hash.add(uint32_t(cbAttachments[i].colorWriteMask));
+
+      if (cbAttachments[i].blendEnable) {
+        hash.add(uint32_t(cbAttachments[i].srcColorBlendFactor));
+        hash.add(uint32_t(cbAttachments[i].dstColorBlendFactor));
+        hash.add(uint32_t(cbAttachments[i].colorBlendOp));
+        hash.add(uint32_t(cbAttachments[i].srcAlphaBlendFactor));
+        hash.add(uint32_t(cbAttachments[i].dstAlphaBlendFactor));
+        hash.add(uint32_t(cbAttachments[i].alphaBlendOp));
       }
     }
 
@@ -621,12 +645,22 @@ namespace dxvk {
 
   size_t DxvkGraphicsPipelinePreRasterizationState::hash() const {
     DxvkHashState hash;
-    hash.add(uint64_t(tsInfo.patchControlPoints) | (uint64_t(rsInfo.depthClampEnable) << 32));
-    hash.add(uint64_t(rsInfo.rasterizerDiscardEnable) | (uint64_t(rsInfo.polygonMode) << 32));
-    hash.add(uint64_t(rsInfo.depthBiasEnable) | (uint64_t(bit::cast<uint32_t>(rsInfo.lineWidth)) << 32));
-    hash.add(uint64_t(rsXfbStreamInfo.rasterizationStream) | (uint64_t(rsDepthClipInfo.depthClipEnable) << 32));
-    hash.add(uint64_t(rsConservativeInfo.conservativeRasterizationMode) | (uint64_t(bit::cast<uint32_t>(rsConservativeInfo.extraPrimitiveOverestimationSize)) << 32));
-    hash.add(uint64_t(rsLineInfo.lineRasterizationMode));
+    hash.add(tsInfo.patchControlPoints);
+
+    hash.add(rsInfo.depthClampEnable);
+    hash.add(rsInfo.rasterizerDiscardEnable);
+    hash.add(rsInfo.polygonMode);
+    hash.add(rsInfo.depthBiasEnable);
+    hash.add(bit::cast<uint32_t>(rsInfo.lineWidth));
+
+    hash.add(rsXfbStreamInfo.rasterizationStream);
+
+    hash.add(rsDepthClipInfo.depthClipEnable);
+
+    hash.add(rsConservativeInfo.conservativeRasterizationMode);
+    hash.add(bit::cast<uint32_t>(rsConservativeInfo.extraPrimitiveOverestimationSize));
+
+    hash.add(rsLineInfo.lineRasterizationMode);
     return hash;
   }
 
@@ -671,17 +705,18 @@ namespace dxvk {
     }
 
     if (eq && dsInfo.stencilTestEnable) {
-      auto ptrA_front = reinterpret_cast<const uint64_t*>(&dsInfo.front.failOp);
-      auto ptrB_front = reinterpret_cast<const uint64_t*>(&other.dsInfo.front.failOp);
-      auto ptrA_back = reinterpret_cast<const uint64_t*>(&dsInfo.back.failOp);
-      auto ptrB_back = reinterpret_cast<const uint64_t*>(&other.dsInfo.back.failOp);
-
-      eq = ptrA_front[0] == ptrB_front[0]
-        && ptrA_front[1] == ptrB_front[1]
-        && ptrA_front[2] == ptrB_front[2]
-        && ptrA_back[0]  == ptrB_back[0]
-        && ptrA_back[1]  == ptrB_back[1]
-        && ptrA_back[2]  == ptrB_back[2];
+      eq = dsInfo.front.failOp      == other.dsInfo.front.failOp
+        && dsInfo.front.passOp      == other.dsInfo.front.passOp
+        && dsInfo.front.depthFailOp == other.dsInfo.front.depthFailOp
+        && dsInfo.front.compareOp   == other.dsInfo.front.compareOp
+        && dsInfo.front.compareMask == other.dsInfo.front.compareMask
+        && dsInfo.front.writeMask   == other.dsInfo.front.writeMask
+        && dsInfo.back.failOp       == other.dsInfo.back.failOp
+        && dsInfo.back.passOp       == other.dsInfo.back.passOp
+        && dsInfo.back.depthFailOp  == other.dsInfo.back.depthFailOp
+        && dsInfo.back.compareOp    == other.dsInfo.back.compareOp
+        && dsInfo.back.compareMask  == other.dsInfo.back.compareMask
+        && dsInfo.back.writeMask    == other.dsInfo.back.writeMask;
     }
 
     return eq;
@@ -690,20 +725,28 @@ namespace dxvk {
 
   size_t DxvkGraphicsPipelineFragmentShaderState::hash() const {
     DxvkHashState hash;
-    hash.add(uint64_t(dsInfo.depthTestEnable) | (uint64_t(dsInfo.depthBoundsTestEnable) << 32));
-    hash.add(uint64_t(dsInfo.stencilTestEnable));
+    hash.add(dsInfo.depthTestEnable);
+    hash.add(dsInfo.depthBoundsTestEnable);
+    hash.add(dsInfo.stencilTestEnable);
 
     if (dsInfo.depthTestEnable) {
-      hash.add(uint64_t(dsInfo.depthWriteEnable) | (uint64_t(dsInfo.depthCompareOp) << 32));
+      hash.add(dsInfo.depthWriteEnable);
+      hash.add(dsInfo.depthCompareOp);
     }
 
     if (dsInfo.stencilTestEnable) {
-      hash.add(uint64_t(dsInfo.front.failOp) | (uint64_t(dsInfo.front.passOp) << 32));
-      hash.add(uint64_t(dsInfo.front.depthFailOp) | (uint64_t(dsInfo.front.compareOp) << 32));
-      hash.add(uint64_t(dsInfo.front.compareMask) | (uint64_t(dsInfo.front.writeMask) << 32));
-      hash.add(uint64_t(dsInfo.back.failOp) | (uint64_t(dsInfo.back.passOp) << 32));
-      hash.add(uint64_t(dsInfo.back.depthFailOp) | (uint64_t(dsInfo.back.compareOp) << 32));
-      hash.add(uint64_t(dsInfo.back.compareMask) | (uint64_t(dsInfo.back.writeMask) << 32));
+      hash.add(dsInfo.front.failOp);
+      hash.add(dsInfo.front.passOp);
+      hash.add(dsInfo.front.depthFailOp);
+      hash.add(dsInfo.front.compareOp);
+      hash.add(dsInfo.front.compareMask);
+      hash.add(dsInfo.front.writeMask);
+      hash.add(dsInfo.back.failOp);
+      hash.add(dsInfo.back.passOp);
+      hash.add(dsInfo.back.depthFailOp);
+      hash.add(dsInfo.back.compareOp);
+      hash.add(dsInfo.back.compareMask);
+      hash.add(dsInfo.back.writeMask);
     }
 
     return hash;

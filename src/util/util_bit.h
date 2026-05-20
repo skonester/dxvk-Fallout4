@@ -12,7 +12,7 @@
 
 #ifdef DXVK_ARCH_X86
   #ifndef _MSC_VER
-    #if defined(_WIN32) && !defined(_MSC_VER) && (defined(__AVX__) || defined(__AVX2__))
+    #if defined(_WIN32) && (defined(__AVX__) || defined(__AVX2__))
       #error "AVX-enabled builds not supported due to stack alignment issues."
     #endif
     #if defined(__WINE__) && defined(__clang__)
@@ -25,9 +25,6 @@
     #endif
   #else
     #include <intrin.h>
-  #endif
-  #if defined(__AVX2__)
-    #include <immintrin.h>
   #endif
 #endif
 
@@ -235,20 +232,7 @@ namespace dxvk::bit {
    * \param [in] size Number of bytes to clear
    */
   inline void bclear(void* mem, size_t size) {
-    #if defined(__AVX2__)
-    auto zero = _mm256_setzero_si256();
-
-    #if defined(__clang__)
-    #pragma nounroll
-    #elif defined(__GNUC__)
-    #pragma GCC unroll 0
-    #endif
-    for (size_t i = 0; i < size; i += 64u) {
-      auto* ptr = reinterpret_cast<__m256i*>(mem) + i / sizeof(zero);
-      _mm256_stream_si256(ptr + 0u, zero);
-      _mm256_stream_si256(ptr + 1u, zero);
-    }
-    #elif defined(DXVK_ARCH_X86) && (defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER))
+    #if defined(DXVK_ARCH_X86) && (defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER))
     auto zero = _mm_setzero_si128();
 
     #if defined(__clang__)
@@ -279,42 +263,7 @@ namespace dxvk::bit {
   template<typename T>
   bool bcmpeq(const T* a, const T* b) {
     static_assert(alignof(T) >= 16);
-    #if defined(__AVX2__)
-    auto ai = reinterpret_cast<const __m256i*>(a);
-    auto bi = reinterpret_cast<const __m256i*>(b);
-
-    size_t i = 0;
-
-    #if defined(__clang__)
-    #pragma nounroll
-    #elif defined(__GNUC__)
-    #pragma GCC unroll 0
-    #endif
-
-    for ( ; i < sizeof(T) / 32; i++) {
-      __m256i eq = _mm256_cmpeq_epi8(
-        _mm256_loadu_si256(ai + i),
-        _mm256_loadu_si256(bi + i));
-
-      int mask = _mm256_movemask_epi8(eq);
-      if (mask != -1)
-        return false;
-    }
-
-    if constexpr ((sizeof(T) % 32) >= 16) {
-      auto ai16 = reinterpret_cast<const __m128i*>(ai + i);
-      auto bi16 = reinterpret_cast<const __m128i*>(bi + i);
-      __m128i eq = _mm_cmpeq_epi8(
-        _mm_load_si128(ai16),
-        _mm_load_si128(bi16));
-
-      int mask = _mm_movemask_epi8(eq);
-      if (mask != 0xFFFF)
-        return false;
-    }
-
-    return true;
-    #elif defined(DXVK_ARCH_X86) && (defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER))
+    #if defined(DXVK_ARCH_X86) && (defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER))
     auto ai = reinterpret_cast<const __m128i*>(a);
     auto bi = reinterpret_cast<const __m128i*>(b);
 
@@ -817,71 +766,4 @@ namespace dxvk::bit {
     return fnv1a_hash(reinterpret_cast<const unsigned char*>(data), size);
   }
 
-  inline uint64_t crc32_hash(const unsigned char* data, size_t size) {
-#if defined(DXVK_ARCH_X86_64)
-    uint64_t crc = 0xcbf29ce484222325ull;
-    size_t idx = 0u;
-    while (idx + 8u <= size) {
-      uint64_t val;
-      std::memcpy(&val, data + idx, sizeof(val));
-      crc = _mm_crc32_u64(crc, val);
-      idx += 8u;
-    }
-    if (idx + 4u <= size) {
-      uint32_t val;
-      std::memcpy(&val, data + idx, sizeof(val));
-      crc = _mm_crc32_u32(uint32_t(crc), val);
-      idx += 4u;
-    }
-    while (idx < size) {
-      crc = _mm_crc32_u8(uint32_t(crc), data[idx]);
-      idx++;
-    }
-    return crc;
-#elif defined(DXVK_ARCH_X86)
-    uint32_t crc = 0x811c9dc5u;
-    size_t idx = 0u;
-    while (idx + 4u <= size) {
-      uint32_t val;
-      std::memcpy(&val, data + idx, sizeof(val));
-      crc = _mm_crc32_u32(crc, val);
-      idx += 4u;
-    }
-    while (idx < size) {
-      crc = _mm_crc32_u8(crc, data[idx]);
-      idx++;
-    }
-    return crc;
-#else
-    return fnv1a_hash(data, size);
-#endif
-  }
-
-  inline uint64_t crc32_hash(const char* data, size_t size) {
-    return crc32_hash(reinterpret_cast<const unsigned char*>(data), size);
-  }
-
-  inline uint64_t crc32_hash_aligned(const void* data, size_t size) {
-    auto ptr = reinterpret_cast<const uint64_t*>(data);
-    size_t count = size / 8u;
-#if defined(DXVK_ARCH_X86_64)
-    uint64_t crc = 0xcbf29ce484222325ull;
-    for (size_t i = 0; i < count; i++) {
-      crc = _mm_crc32_u64(crc, ptr[i]);
-    }
-    return crc;
-#elif defined(DXVK_ARCH_X86)
-    uint32_t crc = 0x811c9dc5u;
-    auto ptr32 = reinterpret_cast<const uint32_t*>(data);
-    size_t count32 = size / 4u;
-    for (size_t i = 0; i < count32; i++) {
-      crc = _mm_crc32_u32(crc, ptr32[i]);
-    }
-    return crc;
-#else
-    return fnv1a_hash(reinterpret_cast<const unsigned char*>(data), size);
-#endif
-  }
-
 }
-

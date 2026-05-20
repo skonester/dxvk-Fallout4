@@ -2,6 +2,7 @@
 # Requires clang-cl and vcpkg (with glslang[tools]) to be installed.
 
 $ErrorActionPreference = "Stop"
+$buildDir = "build_clang"
 
 # 1. Locate Visual Studio 2022 vcvarsall.bat
 Write-Host "Locating Visual Studio 2022 Build Tools/vcvarsall.bat..." -ForegroundColor Cyan
@@ -45,21 +46,41 @@ $env:CC = "clang-cl"
 $env:CXX = "clang-cl"
 
 # 5. Check if build directory needs configuration
-if (-not (Test-Path "build_clang")) {
+if (Test-Path $buildDir) {
+    $mesonInfoPath = Join-Path $buildDir "meson-info\meson-info.json"
+    if (Test-Path $mesonInfoPath) {
+        $mesonInfo = Get-Content $mesonInfoPath -Raw | ConvertFrom-Json
+        $sourceDir = [System.IO.Path]::GetFullPath($mesonInfo.directories.source)
+        $currentDir = [System.IO.Path]::GetFullPath((Get-Location).Path)
+
+        if ($sourceDir -ne $currentDir) {
+            Write-Host "Build directory belongs to a different source tree. Reconfiguring..." -ForegroundColor Yellow
+            Remove-Item -LiteralPath $buildDir -Recurse -Force
+        }
+    }
+}
+
+if (-not (Test-Path $buildDir)) {
     Write-Host "Configuring build directory with meson..." -ForegroundColor Cyan
     # Find python / meson
     $pythonExe = "C:\Users\admin\AppData\Local\Programs\Python\Python311\python.exe"
     if (-not (Test-Path $pythonExe)) {
         $pythonExe = "python" # fallback
     }
-    & $pythonExe -m mesonbuild.mesonmain setup build_clang --backend ninja -Denable_d3d8=false -Denable_d3d9=false -Denable_d3d10=false -Db_vscrt=mt
+    & $pythonExe -m mesonbuild.mesonmain setup $buildDir --backend ninja -Denable_d3d8=false -Denable_d3d9=false -Denable_d3d10=false -Db_vscrt=mt
+    if ($LASTEXITCODE -ne 0) {
+        throw "Meson setup failed with exit code $LASTEXITCODE."
+    }
 } else {
     Write-Host "Build directory already exists. Skipping setup configuration." -ForegroundColor Yellow
 }
 
 # 6. Run Ninja Build
 Write-Host "Starting build..." -ForegroundColor Cyan
-ninja -C build_clang
+ninja -C $buildDir
+if ($LASTEXITCODE -ne 0) {
+    throw "Ninja build failed with exit code $LASTEXITCODE."
+}
 
 Write-Host "Build complete! Output binaries:" -ForegroundColor Green
-Get-ChildItem build_clang/src/**/*.dll | Select-Object Name, FullName, Length | Format-Table
+Get-ChildItem "$buildDir/src/**/*.dll" | Select-Object Name, FullName, Length | Format-Table

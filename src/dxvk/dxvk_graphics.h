@@ -403,16 +403,14 @@ namespace dxvk {
     const DxvkGraphicsPipelineFragmentOutputLibrary*  foLibrary = nullptr;
 
     bool eq(const DxvkGraphicsPipelineBaseInstanceKey& other) const {
-      auto ptrA = reinterpret_cast<const uint64_t*>(this);
-      auto ptrB = reinterpret_cast<const uint64_t*>(&other);
-      return ptrA[0] == ptrB[0] && ptrA[1] == ptrB[1];
+      return viLibrary == other.viLibrary
+          && foLibrary == other.foLibrary;
     }
 
     size_t hash() const {
       DxvkHashState hash;
-      auto ptr = reinterpret_cast<const uint64_t*>(this);
-      hash.add(ptr[0]);
-      hash.add(ptr[1]);
+      hash.add(size_t(viLibrary));
+      hash.add(size_t(foLibrary));
       return hash;
     }
   };

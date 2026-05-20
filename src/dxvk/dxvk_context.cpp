@@ -7312,7 +7312,7 @@ namespace dxvk {
           }
         }
 
-        *reinterpret_cast<VkDeviceAddress*>(&m_state.pc.resourceData[binding.getBlockOffset()]) = va;
+        std::memcpy(&m_state.pc.resourceData[binding.getBlockOffset()], &va, sizeof(va));
       }
     }
 
@@ -7333,7 +7333,7 @@ namespace dxvk {
           m_cmd->track(sampler);
         }
 
-        *reinterpret_cast<uint16_t*>(&m_state.pc.resourceData[binding.getBlockOffset()]) = index;
+        std::memcpy(&m_state.pc.resourceData[binding.getBlockOffset()], &index, sizeof(index));
       }
     }
   }
@@ -7940,14 +7940,6 @@ namespace dxvk {
     if ((bit::tzcnt(pushData.getResourceDwordMask() + 1u) * 4u) < pushData.getSize()) {
       pushInfo.data.address = &localData[pushData.getOffset()];
 
-      auto copyDwords = [](char* dst, const char* src, size_t bytes) {
-        uint32_t* d = reinterpret_cast<uint32_t*>(dst);
-        const uint32_t* s = reinterpret_cast<const uint32_t*>(src);
-        size_t count = bytes / 4;
-        for (size_t i = 0; i < count; ++i)
-          d[i] = s[i];
-      };
-
       for (auto i : bit::BitMask(layout->getPushDataMask())) {
         auto block = layout->getPushDataBlock(i);
         auto blockSize = block.getSize();
@@ -7973,10 +7965,10 @@ namespace dxvk {
           uint32_t byteIndex = dwordIndex * sizeof(uint32_t);
           uint32_t byteCount = dwordCount * sizeof(uint32_t);
 
-          copyDwords(&dstData[rangeOffset],
+          std::memcpy(&dstData[rangeOffset],
             &constantData[rangeOffset], byteIndex);
 
-          copyDwords(&dstData[rangeOffset + byteIndex],
+          std::memcpy(&dstData[rangeOffset + byteIndex],
             &resourceData[rangeOffset + byteIndex],
             byteCount - byteIndex);
 
@@ -7984,7 +7976,7 @@ namespace dxvk {
           rangeOffset += byteCount;
         }
 
-        copyDwords(&dstData[rangeOffset],
+        std::memcpy(&dstData[rangeOffset],
           &constantData[rangeOffset], blockSize - rangeOffset);
       }
     }

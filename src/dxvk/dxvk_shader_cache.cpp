@@ -4,7 +4,6 @@
 #include "dxvk_shader_cache.h"
 
 #include "../util/util_time.h"
-#include "../util/util_bit.h"
 
 namespace dxvk {
 
@@ -267,7 +266,7 @@ namespace dxvk {
       return nullptr;
     }
 
-    if (entry.checksum != bit::crc32_hash(ir.data(), ir.size())) {
+    if (entry.checksum != bit::fnv1a_hash(ir.data(), ir.size())) {
       Logger::warn("Checksum mismatch for cached shader");
       return nullptr;
     }
@@ -563,7 +562,7 @@ namespace dxvk {
 
 
     entry.metadataSize = uint32_t(uint64_t(stream.size()) - (entry.offset + entry.binarySize));
-    entry.checksum = bit::crc32_hash(data, size);
+    entry.checksum = bit::fnv1a_hash(data, size);
     return std::make_optional(entry);
   }
 
@@ -660,7 +659,7 @@ namespace dxvk {
 
   size_t DxvkShaderCache::LutKey::hash() const {
     DxvkHashState hash;
-    hash.add(bit::crc32_hash(name.data(), name.size()));
+    hash.add(bit::fnv1a_hash(name.data(), name.size()));
     hash.add(createInfo.hash());
     return hash;
   }

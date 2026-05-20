@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstring>
 #include <map>
 #include <memory>
 #include <unordered_map>
@@ -118,21 +117,6 @@ namespace dxvk {
     }
 
     bool eq(const DxvkSamplerKey& other) const {
-#if defined(DXVK_ARCH_X86)
-      __m128i propA = _mm_loadu_si128(reinterpret_cast<const __m128i*>(u.properties));
-      __m128i propB = _mm_loadu_si128(reinterpret_cast<const __m128i*>(other.u.properties));
-      __m128i cmpProp = _mm_cmpeq_epi32(propA, propB);
-      if (_mm_movemask_epi8(cmpProp) != 0xFFFF)
-        return false;
-
-      if (u.p.hasBorder) {
-        __m128i borderA = _mm_loadu_si128(reinterpret_cast<const __m128i*>(borderColor.uint32));
-        __m128i borderB = _mm_loadu_si128(reinterpret_cast<const __m128i*>(other.borderColor.uint32));
-        __m128i cmpBorder = _mm_cmpeq_epi32(borderA, borderB);
-        return _mm_movemask_epi8(cmpBorder) == 0xFFFF;
-      }
-      return true;
-#else
       bool eq = u.properties[0] == other.u.properties[0]
              && u.properties[1] == other.u.properties[1]
              && u.properties[2] == other.u.properties[2]
@@ -146,19 +130,10 @@ namespace dxvk {
       }
 
       return eq;
-#endif
     }
 
     size_t hash() const {
       DxvkHashState hash;
-#if defined(DXVK_ARCH_X86_64)
-      hash.add(*reinterpret_cast<const uint64_t*>(&u.properties[0]));
-      hash.add(*reinterpret_cast<const uint64_t*>(&u.properties[2]));
-      if (u.p.hasBorder) {
-        hash.add(*reinterpret_cast<const uint64_t*>(&borderColor.uint32[0]));
-        hash.add(*reinterpret_cast<const uint64_t*>(&borderColor.uint32[2]));
-      }
-#else
       hash.add(u.properties[0]);
       hash.add(u.properties[1]);
       hash.add(u.properties[2]);
@@ -170,7 +145,7 @@ namespace dxvk {
         hash.add(borderColor.uint32[2]);
         hash.add(borderColor.uint32[3]);
       }
-#endif
+
       return hash;
     }
 
