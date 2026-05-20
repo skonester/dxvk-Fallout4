@@ -6,7 +6,6 @@ util_src = files([
   'util_flush.cpp',
   'util_gdi.cpp',
   'util_luid.cpp',
-  'util_matrix.cpp',
   'util_shared_res.cpp',
   'util_sleep.cpp',
 
@@ -27,10 +26,24 @@ util_src = files([
   'sync/sync_recursive.cpp',
 ])
 
+util_link_libs = []
+
+if get_option('dxvk_experimental_simd')
+  util_matrix_lib = static_library('util_matrix_simd', files('util_matrix.cpp'),
+    include_directories : [ dxvk_include_path ],
+    cpp_args            : dxvk_experimental_simd_args,
+  )
+
+  util_link_libs += [ util_matrix_lib ]
+else
+  util_src += files([ 'util_matrix.cpp' ])
+endif
+
 util_lib = static_library('util', util_src,
   include_directories : [ dxvk_include_path ],
+  link_with           : util_link_libs,
 )
 
 util_dep = declare_dependency(
-  link_with           : [ util_lib ],
+  link_with           : [ util_lib ] + util_link_libs,
 )

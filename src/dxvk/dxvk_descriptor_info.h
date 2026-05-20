@@ -159,6 +159,12 @@ namespace dxvk {
       const DxvkDescriptorUpdateRange&  range);
 
     template<size_t Size>
+    static void copyAligned32(
+            void*                       dst,
+      const DxvkDescriptor**            descriptor,
+      const DxvkDescriptorUpdateRange&  range);
+
+    template<size_t Size>
     static void padAligned(
             void*                       dst,
       const DxvkDescriptor**            descriptor,

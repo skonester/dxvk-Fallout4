@@ -5,11 +5,15 @@
 
 #include "../util/util_bit.h"
 
+#if defined(__AVX2__)
+  #include <immintrin.h>
+#endif
+
 namespace dxvk {
 
   template<size_t Size>
   static force_inline void copy_nontemporal(void* dst, const void* src) {
-    static_assert(Size == 4u || Size == 8u || Size == 16u);
+    static_assert(Size == 4u || Size == 8u || Size == 16u || Size == 32u);
 
     #if defined(DXVK_ARCH_X86) && (defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER))
     switch (Size) {
@@ -36,6 +40,16 @@ namespace dxvk {
         auto dstPtr = reinterpret_cast<      __m128i*>(dst);
         auto srcPtr = reinterpret_cast<const __m128i*>(src);
         _mm_stream_si128(dstPtr, _mm_loadu_si128(srcPtr));
+      } break;
+
+      case 32u: {
+        #if defined(__AVX2__)
+        auto dstPtr = reinterpret_cast<      __m256i*>(dst);
+        auto srcPtr = reinterpret_cast<const __m256i*>(src);
+        _mm256_stream_si256(dstPtr, _mm256_loadu_si256(srcPtr));
+        #else
+        std::memcpy(dst, src, Size);
+        #endif
       } break;
     }
     #else
@@ -178,6 +192,21 @@ namespace dxvk {
 
 
   DxvkDescriptorUpdateFn* DxvkDescriptorUpdateList::getCopyFn(uint32_t alignment, uint32_t size) {
+    #if defined(__AVX2__)
+    if (alignment >= 32u && !(size & 31u)) {
+      switch (size) {
+        case  32u: return &copyAligned32< 32u>;
+        case  64u: return &copyAligned32< 64u>;
+        case  96u: return &copyAligned32< 96u>;
+        case 128u: return &copyAligned32<128u>;
+        case 160u: return &copyAligned32<160u>;
+        case 192u: return &copyAligned32<192u>;
+        case 224u: return &copyAligned32<224u>;
+        case 256u: return &copyAligned32<256u>;
+      }
+    }
+    #endif
+
     if (alignment >= 16u || alignment >= size || !alignment) {
       switch (size) {
         case   4u: return &copyAligned< 4u>;
@@ -274,6 +303,27 @@ namespace dxvk {
 
         dstPtr += 4u;
       }
+    }
+  }
+
+
+  template<size_t Size>
+  void DxvkDescriptorUpdateList::copyAligned32(
+          void*                       dst,
+    const DxvkDescriptor**            descriptor,
+    const DxvkDescriptorUpdateRange&  range) {
+    static_assert((Size & 31u) == 0u);
+
+    auto dstPtr = reinterpret_cast<char*>(dst) + range.dstOffset;
+    auto srcBase = descriptor + range.srcIndex;
+
+    for (uint32_t i = 0u; i < range.descriptorCount; i++) {
+      auto srcPtr = reinterpret_cast<const char*>(srcBase[i]->descriptor.data());
+
+      for (size_t j = 0u; j < Size / 32u; j++)
+        copy_nontemporal<32u>(dstPtr + 32u * j, srcPtr + 32u * j);
+
+      dstPtr += Size;
     }
   }
 

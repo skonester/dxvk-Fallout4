@@ -38,7 +38,6 @@ dxvk_src = [
   'dxvk_context.cpp',
   'dxvk_cs.cpp',
   'dxvk_descriptor_heap.cpp',
-  'dxvk_descriptor_info.cpp',
   'dxvk_descriptor_pool.cpp',
   'dxvk_descriptor_worker.cpp',
   'dxvk_device.cpp',
@@ -101,13 +100,28 @@ if platform == 'linux'
   dxvk_extra_deps += [ cpp.find_library('dl', required: false) ]
 endif
 
+dxvk_link_libs = [ util_lib, spirv_lib, wsi_lib ]
+
+if get_option('dxvk_experimental_simd')
+  dxvk_descriptor_info_lib = static_library('dxvk_descriptor_info_simd', files('dxvk_descriptor_info.cpp'),
+    dependencies        : [ dxbc_spirv_dep, vkcommon_dep ] + dxvk_extra_deps,
+    include_directories : [ dxvk_include_path ],
+    link_with           : dxvk_link_libs,
+    cpp_args            : dxvk_experimental_simd_args,
+  )
+
+  dxvk_link_libs += [ dxvk_descriptor_info_lib ]
+else
+  dxvk_src += [ 'dxvk_descriptor_info.cpp' ]
+endif
+
 dxvk_lib = static_library('dxvk', dxvk_src, glsl_generator.process(dxvk_shaders), dxvk_version,
-  link_with           : [ util_lib, spirv_lib, wsi_lib ],
+  link_with           : dxvk_link_libs,
   dependencies        : [ dxbc_spirv_dep, vkcommon_dep ] + dxvk_extra_deps,
   include_directories : [ dxvk_include_path ],
 )
 
 dxvk_dep = declare_dependency(
-  link_with           : [ dxvk_lib ],
+  link_with           : [ dxvk_lib ] + dxvk_link_libs,
   include_directories : [ dxvk_include_path ],
 )

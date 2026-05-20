@@ -8,6 +8,7 @@ fs = import('fs')
 cpp = meson.get_compiler('cpp')
 cc = meson.get_compiler('c')
 dxvk_is_msvc = cpp.get_argument_syntax() == 'msvc'
+dxvk_experimental_simd_args = []
 
 compiler_args = [
   '-msse',
@@ -29,6 +30,24 @@ compiler_args = [
 ]
 
 link_args = []
+
+if get_option('dxvk_experimental_simd')
+  if cpu_family not in ['x86', 'x86_64']
+    error('Experimental SIMD is only supported on x86/x86_64 targets.')
+  endif
+
+  if dxvk_is_msvc
+    dxvk_experimental_simd_args += cpp.get_supported_arguments('/arch:AVX2')
+    dxvk_experimental_simd_args += cpp.get_supported_arguments('/clang:-mfma')
+  else
+    dxvk_experimental_simd_args += cpp.get_supported_arguments('-mavx2')
+    dxvk_experimental_simd_args += cpp.get_supported_arguments('-mfma')
+  endif
+
+  if dxvk_experimental_simd_args.length() == 0
+    error('Experimental SIMD requested, but the compiler does not support AVX2 arguments.')
+  endif
+endif
 
 if get_option('build_id')
   link_args += [

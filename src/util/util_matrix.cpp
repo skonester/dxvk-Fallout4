@@ -1,5 +1,9 @@
 #include "util_matrix.h"
 
+#if defined(__AVX2__) || defined(__FMA__)
+  #include <immintrin.h>
+#endif
+
 namespace dxvk {
 
         Vector4& Matrix4::operator[](size_t index)       { return data[index]; }
@@ -17,22 +21,62 @@ namespace dxvk {
   bool Matrix4::operator!=(const Matrix4& m2) const { return !operator==(m2); }
 
   Matrix4 Matrix4::operator+(const Matrix4& other) const {
+    #if defined(__AVX2__)
+    Matrix4 mat;
+    auto a = reinterpret_cast<const float*>(data);
+    auto b = reinterpret_cast<const float*>(other.data);
+    auto r = reinterpret_cast<float*>(mat.data);
+
+    _mm256_storeu_ps(r + 0u, _mm256_add_ps(_mm256_loadu_ps(a + 0u), _mm256_loadu_ps(b + 0u)));
+    _mm256_storeu_ps(r + 8u, _mm256_add_ps(_mm256_loadu_ps(a + 8u), _mm256_loadu_ps(b + 8u)));
+    return mat;
+    #else
     Matrix4 mat;
     for (uint32_t i = 0; i < 4; i++)
       mat[i] = data[i] + other.data[i];
     return mat;
+    #endif
   }
 
   Matrix4 Matrix4::operator-(const Matrix4& other) const {
+    #if defined(__AVX2__)
+    Matrix4 mat;
+    auto a = reinterpret_cast<const float*>(data);
+    auto b = reinterpret_cast<const float*>(other.data);
+    auto r = reinterpret_cast<float*>(mat.data);
+
+    _mm256_storeu_ps(r + 0u, _mm256_sub_ps(_mm256_loadu_ps(a + 0u), _mm256_loadu_ps(b + 0u)));
+    _mm256_storeu_ps(r + 8u, _mm256_sub_ps(_mm256_loadu_ps(a + 8u), _mm256_loadu_ps(b + 8u)));
+    return mat;
+    #else
     Matrix4 mat;
     for (uint32_t i = 0; i < 4; i++)
       mat[i] = data[i] - other.data[i];
     return mat;
+    #endif
   }
 
   Matrix4 Matrix4::operator*(const Matrix4& m2) const {
     const Matrix4& m1 = *this;
 
+    #if defined(__FMA__)
+    const __m128 a0 = _mm_loadu_ps(m1[0].data);
+    const __m128 a1 = _mm_loadu_ps(m1[1].data);
+    const __m128 a2 = _mm_loadu_ps(m1[2].data);
+    const __m128 a3 = _mm_loadu_ps(m1[3].data);
+
+    Matrix4 result;
+
+    for (uint32_t i = 0; i < 4; i++) {
+      __m128 r = _mm_mul_ps(a0, _mm_set1_ps(m2[i][0]));
+      r = _mm_fmadd_ps(a1, _mm_set1_ps(m2[i][1]), r);
+      r = _mm_fmadd_ps(a2, _mm_set1_ps(m2[i][2]), r);
+      r = _mm_fmadd_ps(a3, _mm_set1_ps(m2[i][3]), r);
+      _mm_storeu_ps(result[i].data, r);
+    }
+
+    return result;
+    #else
     const Vector4 srcA0 = { m1[0] };
     const Vector4 srcA1 = { m1[1] };
     const Vector4 srcA2 = { m1[2] };
@@ -49,11 +93,22 @@ namespace dxvk {
     result[2] = srcA0 * srcB2[0] + srcA1 * srcB2[1] + srcA2 * srcB2[2] + srcA3 * srcB2[3];
     result[3] = srcA0 * srcB3[0] + srcA1 * srcB3[1] + srcA2 * srcB3[2] + srcA3 * srcB3[3];
     return result;
+    #endif
   }
 
   Vector4 Matrix4::operator*(const Vector4& v) const {
     const Matrix4& m = *this;
 
+    #if defined(__FMA__)
+    __m128 r = _mm_mul_ps(_mm_loadu_ps(m[0].data), _mm_set1_ps(v[0]));
+    r = _mm_fmadd_ps(_mm_loadu_ps(m[1].data), _mm_set1_ps(v[1]), r);
+    r = _mm_fmadd_ps(_mm_loadu_ps(m[2].data), _mm_set1_ps(v[2]), r);
+    r = _mm_fmadd_ps(_mm_loadu_ps(m[3].data), _mm_set1_ps(v[3]), r);
+
+    Vector4 result;
+    _mm_storeu_ps(result.data, r);
+    return result;
+    #else
     const Vector4 mul0 = { m[0] * v[0] };
     const Vector4 mul1 = { m[1] * v[1] };
     const Vector4 mul2 = { m[2] * v[2] };
@@ -63,20 +118,43 @@ namespace dxvk {
     const Vector4 add1 = { mul2 + mul3 };
 
     return add0 + add1;
+    #endif
   }
 
   Matrix4 Matrix4::operator*(float scalar) const {
+    #if defined(__AVX2__)
+    Matrix4 mat;
+    auto a = reinterpret_cast<const float*>(data);
+    auto r = reinterpret_cast<float*>(mat.data);
+    auto s = _mm256_set1_ps(scalar);
+
+    _mm256_storeu_ps(r + 0u, _mm256_mul_ps(_mm256_loadu_ps(a + 0u), s));
+    _mm256_storeu_ps(r + 8u, _mm256_mul_ps(_mm256_loadu_ps(a + 8u), s));
+    return mat;
+    #else
     Matrix4 mat;
     for (uint32_t i = 0; i < 4; i++)
       mat[i] = data[i] * scalar;
     return mat;
+    #endif
   }
 
   Matrix4 Matrix4::operator/(float scalar) const {
+    #if defined(__AVX2__)
+    Matrix4 mat;
+    auto a = reinterpret_cast<const float*>(data);
+    auto r = reinterpret_cast<float*>(mat.data);
+    auto s = _mm256_set1_ps(scalar);
+
+    _mm256_storeu_ps(r + 0u, _mm256_div_ps(_mm256_loadu_ps(a + 0u), s));
+    _mm256_storeu_ps(r + 8u, _mm256_div_ps(_mm256_loadu_ps(a + 8u), s));
+    return mat;
+    #else
     Matrix4 mat;
     for (uint32_t i = 0; i < 4; i++)
       mat[i] = data[i] / scalar;
     return mat;
+    #endif
   }
 
   Matrix4& Matrix4::operator+=(const Matrix4& other) {
@@ -213,12 +291,23 @@ namespace dxvk {
   }
 
   Matrix4 hadamardProduct(const Matrix4& a, const Matrix4& b) {
+    #if defined(__AVX2__)
+    Matrix4 result;
+    auto ap = reinterpret_cast<const float*>(a.data);
+    auto bp = reinterpret_cast<const float*>(b.data);
+    auto rp = reinterpret_cast<float*>(result.data);
+
+    _mm256_storeu_ps(rp + 0u, _mm256_mul_ps(_mm256_loadu_ps(ap + 0u), _mm256_loadu_ps(bp + 0u)));
+    _mm256_storeu_ps(rp + 8u, _mm256_mul_ps(_mm256_loadu_ps(ap + 8u), _mm256_loadu_ps(bp + 8u)));
+    return result;
+    #else
     Matrix4 result;
 
     for (uint32_t i = 0; i < 4; i++)
       result[i] = a[i] * b[i];
 
     return result;
+    #endif
   }
 
   std::ostream& operator<<(std::ostream& os, const Matrix4& m) {

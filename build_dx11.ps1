@@ -2,7 +2,18 @@
 # Requires clang-cl and vcpkg (with glslang[tools]) to be installed.
 
 $ErrorActionPreference = "Stop"
-$buildDir = "build_clang"
+$buildDir = if ($env:DXVK_BUILD_DIR) { $env:DXVK_BUILD_DIR } else { "build_clang" }
+$mesonOptions = @(
+    "--backend", "ninja",
+    "-Denable_d3d8=false",
+    "-Denable_d3d9=false",
+    "-Denable_d3d10=false",
+    "-Db_vscrt=mt"
+)
+
+if ($env:DXVK_EXPERIMENTAL_SIMD -eq "1") {
+    $mesonOptions += "-Ddxvk_experimental_simd=true"
+}
 
 # 1. Locate Visual Studio 2022 vcvarsall.bat
 Write-Host "Locating Visual Studio 2022 Build Tools/vcvarsall.bat..." -ForegroundColor Cyan
@@ -67,7 +78,7 @@ if (-not (Test-Path $buildDir)) {
     if (-not (Test-Path $pythonExe)) {
         $pythonExe = "python" # fallback
     }
-    & $pythonExe -m mesonbuild.mesonmain setup $buildDir --backend ninja -Denable_d3d8=false -Denable_d3d9=false -Denable_d3d10=false -Db_vscrt=mt
+    & $pythonExe -m mesonbuild.mesonmain setup $buildDir @mesonOptions
     if ($LASTEXITCODE -ne 0) {
         throw "Meson setup failed with exit code $LASTEXITCODE."
     }
