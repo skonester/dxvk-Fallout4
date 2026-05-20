@@ -963,7 +963,35 @@ namespace dxvk {
       uint32_t index = DxvkPushDataBlock::computeIndex(stages);
 
       uint32_t baseOffset = computePushDataBlockOffset(index);
-      std::memcpy(&m_state.pc.constantData[baseOffset + offset], data, size);
+      char* dst = &m_state.pc.constantData[baseOffset + offset];
+      const char* src = reinterpret_cast<const char*>(data);
+
+      if (size == 4) {
+        *reinterpret_cast<uint32_t*>(dst) = *reinterpret_cast<const uint32_t*>(src);
+      } else if (size == 8) {
+        *reinterpret_cast<uint64_t*>(dst) = *reinterpret_cast<const uint64_t*>(src);
+      } else if (size == 16) {
+#if defined(DXVK_ARCH_X86)
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst),
+                         _mm_loadu_si128(reinterpret_cast<const __m128i*>(src)));
+#else
+        std::memcpy(dst, src, 16);
+#endif
+      } else if (size == 32) {
+#if defined(DXVK_ARCH_X86) && defined(__AVX2__)
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(dst),
+                            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src)));
+#elif defined(DXVK_ARCH_X86)
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst),
+                         _mm_loadu_si128(reinterpret_cast<const __m128i*>(src)));
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + 16),
+                         _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + 16)));
+#else
+        std::memcpy(dst, src, 32);
+#endif
+      } else {
+        std::memcpy(dst, src, size);
+      }
 
       m_flags.set(DxvkContextFlag::DirtyPushData);
     }

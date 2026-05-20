@@ -13,6 +13,9 @@ compiler_args = [
   '-msse',
   '-msse2',
   '-msse3',
+  '-mfma',
+  '-ffp-contract=fast',
+  '-ffast-math',
   '-mfpmath=sse',
   '-Wimplicit-fallthrough',
   # gcc
@@ -95,7 +98,11 @@ if platform == 'windows'
     # setup file alignment + enable PDB output for MSVC builds
     # PDBs are useful for Windows consumers of DXVK 
     compiler_args += [
-      '/Z7'
+      '/Z7',
+      '/arch:AVX2',
+      '/fp:fast',
+      '/clang:-mfma',
+      '/clang:-ffp-contract=fast',
     ]
     link_args += [
       '/FILEALIGN:4096',

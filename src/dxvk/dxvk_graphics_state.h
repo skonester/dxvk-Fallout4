@@ -647,8 +647,7 @@ namespace dxvk {
     }
 
     size_t hash() const {
-      auto src = reinterpret_cast<const unsigned char*>(this);
-      return size_t(bit::fnv1a_hash(src, sizeof(*this)));
+      return size_t(bit::crc32_hash_aligned(this, sizeof(*this)));
     }
 
     bool useDynamicDepthTest() const {
@@ -749,8 +748,7 @@ namespace dxvk {
     }
     
     size_t hash() const {
-      auto src = reinterpret_cast<const unsigned char*>(this);
-      return size_t(bit::fnv1a_hash(src, sizeof(*this)));
+      return size_t(bit::crc32_hash_aligned(this, sizeof(*this)));
     }
 
     DxvkScInfo              sc;

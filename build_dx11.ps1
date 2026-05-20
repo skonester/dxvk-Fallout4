@@ -52,7 +52,7 @@ if (-not (Test-Path "build_clang")) {
     if (-not (Test-Path $pythonExe)) {
         $pythonExe = "python" # fallback
     }
-    & $pythonExe -m mesonbuild.mesonmain setup build_clang --backend ninja -Denable_d3d8=false -Denable_d3d9=false -Denable_d3d10=false -Dc_args="-mavx2 -mfma /fp:fast" -Dcpp_args="-mavx2 -mfma /fp:fast"
+    & $pythonExe -m mesonbuild.mesonmain setup build_clang --backend ninja -Denable_d3d8=false -Denable_d3d9=false -Denable_d3d10=false -Db_vscrt=mt
 } else {
     Write-Host "Build directory already exists. Skipping setup configuration." -ForegroundColor Yellow
 }

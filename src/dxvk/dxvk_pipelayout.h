@@ -667,11 +667,9 @@ namespace dxvk {
      * \returns \c true if the two blocks are identical
      */
     bool eq(const DxvkPushDataBlock& other) const {
-      return m_stageMask    == other.m_stageMask
-          && m_alignment    == other.m_alignment
-          && m_offset       == other.m_offset
-          && m_size         == other.m_size
-          && m_resourceMask == other.m_resourceMask;
+      auto ptrA = reinterpret_cast<const uint64_t*>(this);
+      auto ptrB = reinterpret_cast<const uint64_t*>(&other);
+      return ptrA[0] == ptrB[0] && ptrA[1] == ptrB[1];
     }
 
     /**
@@ -680,11 +678,9 @@ namespace dxvk {
      */
     size_t hash() const {
       DxvkHashState hash;
-      hash.add(m_stageMask);
-      hash.add(m_alignment);
-      hash.add(m_offset);
-      hash.add(m_size);
-      hash.add(m_resourceMask);
+      auto ptr = reinterpret_cast<const uint64_t*>(this);
+      hash.add(ptr[0]);
+      hash.add(ptr[1]);
       return hash;
     }
 

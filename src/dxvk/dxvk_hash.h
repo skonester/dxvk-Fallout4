@@ -3,6 +3,7 @@
 #include <cstddef>
 
 #include "../util/util_env.h"
+#include "../util/util_bit.h"
 
 namespace dxvk {
 
@@ -31,8 +32,14 @@ namespace dxvk {
   public:
 
     void add(size_t hash) {
+#if defined(DXVK_ARCH_X86_64)
+      m_value = _mm_crc32_u64(m_value, hash);
+#elif defined(DXVK_ARCH_X86)
+      m_value = _mm_crc32_u32(m_value, hash);
+#else
       m_value ^= hash;
       m_value *= Prime;
+#endif
     }
 
     operator size_t () const {

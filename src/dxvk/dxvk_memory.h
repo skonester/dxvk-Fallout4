@@ -2,6 +2,7 @@
 
 #include <map>
 #include <memory>
+#include <cstring>
 
 #include "dxvk_access.h"
 #include "dxvk_adapter.h"
@@ -269,19 +270,11 @@ namespace dxvk {
     VkDeviceSize size = 0u;
 
     size_t hash() const {
-      DxvkHashState hash;
-      hash.add(uint32_t(format));
-      hash.add(uint32_t(usage));
-      hash.add(offset);
-      hash.add(size);
-      return hash;
+      return bit::crc32_hash(reinterpret_cast<const char*>(this), sizeof(DxvkBufferViewKey));
     }
 
     bool eq(const DxvkBufferViewKey& other) const {
-      return format == other.format
-          && usage  == other.usage
-          && offset == other.offset
-          && size   == other.size;
+      return std::memcmp(this, &other, sizeof(DxvkBufferViewKey)) == 0;
     }
   };
 
@@ -353,29 +346,11 @@ namespace dxvk {
     uint16_t packedSwizzle = 0u;
 
     size_t hash() const {
-      DxvkHashState hash;
-      hash.add(uint32_t(viewType));
-      hash.add(uint32_t(usage));
-      hash.add(uint32_t(format));
-      hash.add(uint32_t(layout));
-      hash.add(uint32_t(aspects));
-      hash.add(uint32_t(mipIndex) | (uint32_t(mipCount) << 16));
-      hash.add(uint32_t(layerIndex) | (uint32_t(layerCount) << 16));
-      hash.add(uint32_t(packedSwizzle));
-      return hash;
+      return bit::crc32_hash(reinterpret_cast<const char*>(this), sizeof(DxvkImageViewKey));
     }
 
     bool eq(const DxvkImageViewKey& other) const {
-      return viewType == other.viewType
-          && usage == other.usage
-          && format == other.format
-          && layout == other.layout
-          && aspects == other.aspects
-          && mipIndex == other.mipIndex
-          && mipCount == other.mipCount
-          && layerIndex == other.layerIndex
-          && layerCount == other.layerCount
-          && packedSwizzle == other.packedSwizzle;
+      return std::memcmp(this, &other, sizeof(DxvkImageViewKey)) == 0;
     }
 
     VkComponentMapping unpackSwizzle() const {

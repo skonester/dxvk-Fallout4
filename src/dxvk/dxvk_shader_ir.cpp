@@ -3,6 +3,7 @@
 #include <spirv/spirv_builder.h>
 
 #include <util/util_log.h>
+#include <util/util_bit.h>
 
 #include "dxvk_shader_ir.h"
 
@@ -12,7 +13,7 @@ namespace dxvk {
     static_assert(std::is_trivially_copyable_v<DxvkShaderOptions>);
 
     DxvkHashState hash;
-    hash.add(bit::fnv1a_hash(reinterpret_cast<const char*>(&options), sizeof(options)));
+    hash.add(bit::crc32_hash(reinterpret_cast<const char*>(&options), sizeof(options)));
     hash.add(flatShadingInputs);
     hash.add(rasterizedStream);
 

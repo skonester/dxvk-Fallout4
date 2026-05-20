@@ -117,8 +117,164 @@ namespace dxvk {
         T r, g, b, a;
       };
     };
-
   };
+
+  template <>
+  inline bool Vector4Base<float>::operator==(const Vector4Base<float>& other) const {
+    #if defined(DXVK_ARCH_X86)
+    __m128 va = _mm_loadu_ps(data);
+    __m128 vb = _mm_loadu_ps(other.data);
+    __m128 cmp = _mm_cmpeq_ps(va, vb);
+    return _mm_movemask_ps(cmp) == 0xF;
+    #else
+    for (uint32_t i = 0; i < 4; i++) {
+      if (data[i] != other.data[i])
+        return false;
+    }
+    return true;
+    #endif
+  }
+
+  template <>
+  inline Vector4Base<float> Vector4Base<float>::operator-() const {
+    #if defined(DXVK_ARCH_X86)
+    Vector4Base<float> result;
+    __m128 zero = _mm_setzero_ps();
+    __m128 val = _mm_loadu_ps(data);
+    _mm_storeu_ps(result.data, _mm_sub_ps(zero, val));
+    return result;
+    #else
+    return {-x, -y, -z, -w};
+    #endif
+  }
+
+  template <>
+  inline Vector4Base<float> Vector4Base<float>::operator+(const Vector4Base<float>& other) const {
+    #if defined(DXVK_ARCH_X86)
+    Vector4Base<float> result;
+    _mm_storeu_ps(result.data, _mm_add_ps(_mm_loadu_ps(data), _mm_loadu_ps(other.data)));
+    return result;
+    #else
+    return {x + other.x, y + other.y, z + other.z, w + other.w};
+    #endif
+  }
+
+  template <>
+  inline Vector4Base<float> Vector4Base<float>::operator-(const Vector4Base<float>& other) const {
+    #if defined(DXVK_ARCH_X86)
+    Vector4Base<float> result;
+    _mm_storeu_ps(result.data, _mm_sub_ps(_mm_loadu_ps(data), _mm_loadu_ps(other.data)));
+    return result;
+    #else
+    return {x - other.x, y - other.y, z - other.z, w - other.w};
+    #endif
+  }
+
+  template <>
+  inline Vector4Base<float> Vector4Base<float>::operator*(float scalar) const {
+    #if defined(DXVK_ARCH_X86)
+    Vector4Base<float> result;
+    _mm_storeu_ps(result.data, _mm_mul_ps(_mm_loadu_ps(data), _mm_set1_ps(scalar)));
+    return result;
+    #else
+    return {scalar * x, scalar * y, scalar * z, scalar * w};
+    #endif
+  }
+
+  template <>
+  inline Vector4Base<float> Vector4Base<float>::operator*(const Vector4Base<float>& other) const {
+    #if defined(DXVK_ARCH_X86)
+    Vector4Base<float> result;
+    _mm_storeu_ps(result.data, _mm_mul_ps(_mm_loadu_ps(data), _mm_loadu_ps(other.data)));
+    return result;
+    #else
+    Vector4Base result;
+    for (uint32_t i = 0; i < 4; i++)
+      result[i] = data[i] * other.data[i];
+    return result;
+    #endif
+  }
+
+  template <>
+  inline Vector4Base<float> Vector4Base<float>::operator/(const Vector4Base<float>& other) const {
+    #if defined(DXVK_ARCH_X86)
+    Vector4Base<float> result;
+    _mm_storeu_ps(result.data, _mm_div_ps(_mm_loadu_ps(data), _mm_loadu_ps(other.data)));
+    return result;
+    #else
+    Vector4Base result;
+    for (uint32_t i = 0; i < 4; i++)
+      result[i] = data[i] / other.data[i];
+    return result;
+    #endif
+  }
+
+  template <>
+  inline Vector4Base<float> Vector4Base<float>::operator/(float scalar) const {
+    #if defined(DXVK_ARCH_X86)
+    Vector4Base<float> result;
+    _mm_storeu_ps(result.data, _mm_div_ps(_mm_loadu_ps(data), _mm_set1_ps(scalar)));
+    return result;
+    #else
+    return {x / scalar, y / scalar, z / scalar, w / scalar};
+    #endif
+  }
+
+  template <>
+  inline Vector4Base<float>& Vector4Base<float>::operator+=(const Vector4Base<float>& other) {
+    #if defined(DXVK_ARCH_X86)
+    _mm_storeu_ps(data, _mm_add_ps(_mm_loadu_ps(data), _mm_loadu_ps(other.data)));
+    return *this;
+    #else
+    x += other.x;
+    y += other.y;
+    z += other.z;
+    w += other.w;
+    return *this;
+    #endif
+  }
+
+  template <>
+  inline Vector4Base<float>& Vector4Base<float>::operator-=(const Vector4Base<float>& other) {
+    #if defined(DXVK_ARCH_X86)
+    _mm_storeu_ps(data, _mm_sub_ps(_mm_loadu_ps(data), _mm_loadu_ps(other.data)));
+    return *this;
+    #else
+    x -= other.x;
+    y -= other.y;
+    z -= other.z;
+    w -= other.w;
+    return *this;
+    #endif
+  }
+
+  template <>
+  inline Vector4Base<float>& Vector4Base<float>::operator*=(float scalar) {
+    #if defined(DXVK_ARCH_X86)
+    _mm_storeu_ps(data, _mm_mul_ps(_mm_loadu_ps(data), _mm_set1_ps(scalar)));
+    return *this;
+    #else
+    x *= scalar;
+    y *= scalar;
+    z *= scalar;
+    w *= scalar;
+    return *this;
+    #endif
+  }
+
+  template <>
+  inline Vector4Base<float>& Vector4Base<float>::operator/=(float scalar) {
+    #if defined(DXVK_ARCH_X86)
+    _mm_storeu_ps(data, _mm_div_ps(_mm_loadu_ps(data), _mm_set1_ps(scalar)));
+    return *this;
+    #else
+    x /= scalar;
+    y /= scalar;
+    z /= scalar;
+    w /= scalar;
+    return *this;
+    #endif
+  }
 
   template <typename T>
   inline Vector4Base<T> operator*(T scalar, const Vector4Base<T>& vector) {
@@ -128,6 +284,18 @@ namespace dxvk {
   template <typename T>
   float dot(const Vector4Base<T>& a, const Vector4Base<T>& b) {
     return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+  }
+
+  template <>
+  inline float dot(const Vector4Base<float>& a, const Vector4Base<float>& b) {
+    #if defined(DXVK_ARCH_X86)
+    __m128 va = _mm_loadu_ps(a.data);
+    __m128 vb = _mm_loadu_ps(b.data);
+    __m128 vr = _mm_dp_ps(va, vb, 0xF1);
+    return _mm_cvtss_f32(vr);
+    #else
+    return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+    #endif
   }
 
   template <typename T>
