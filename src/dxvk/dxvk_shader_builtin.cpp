@@ -5,6 +5,11 @@
 #include <ir/passes/ir_pass_scalarize.h>
 
 #include "dxvk_shader_builtin.h"
+#include "../util/util_simd_perf.h"
+
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
 
 namespace dxvk {
 
@@ -519,12 +524,58 @@ namespace dxvk {
     ir::Op compositeOp(ir::OpCode::eCompositeConstruct,
       ir::BasicType(type.getBaseType(), 4u));
 
+#if defined(__AVX2__)
+    DXVK_SIMD_PERF_SCOPE(ShaderOps);
+    alignas(16) ir::SsaDef extracted[4];
+    alignas(16) ir::SsaDef zero[4];
+
+    uint32_t vecSize = type.getVectorSize();
+    for (uint32_t i = 0u; i < 4u; i++) {
+      if (i < vecSize)
+        extracted[i] = emitExtractVector(builder, a, i, 1u);
+      else
+        extracted[i] = ir::SsaDef();
+      zero[i] = builder.makeConstantZero(type.getBaseType());
+    }
+
+    uint32_t activeMask = formatInfo->componentMask & ((1u << vecSize) - 1u);
+    alignas(16) ir::SsaDef result[4];
+
+    __m128i zeroReg = _mm_load_si128(reinterpret_cast<const __m128i*>(zero));
+    __m128i extReg = _mm_load_si128(reinterpret_cast<const __m128i*>(extracted));
+    __m128i resReg;
+
+    switch (activeMask & 0xFu) {
+      case 0x0: resReg = _mm_blend_epi32(_mm_load_si128(reinterpret_cast<const __m128i*>(zero)), _mm_load_si128(reinterpret_cast<const __m128i*>(extracted)), 0x0); break;
+      case 0x1: resReg = _mm_blend_epi32(_mm_load_si128(reinterpret_cast<const __m128i*>(zero)), _mm_load_si128(reinterpret_cast<const __m128i*>(extracted)), 0x1); break;
+      case 0x2: resReg = _mm_blend_epi32(_mm_load_si128(reinterpret_cast<const __m128i*>(zero)), _mm_load_si128(reinterpret_cast<const __m128i*>(extracted)), 0x2); break;
+      case 0x3: resReg = _mm_blend_epi32(_mm_load_si128(reinterpret_cast<const __m128i*>(zero)), _mm_load_si128(reinterpret_cast<const __m128i*>(extracted)), 0x3); break;
+      case 0x4: resReg = _mm_blend_epi32(_mm_load_si128(reinterpret_cast<const __m128i*>(zero)), _mm_load_si128(reinterpret_cast<const __m128i*>(extracted)), 0x4); break;
+      case 0x5: resReg = _mm_blend_epi32(_mm_load_si128(reinterpret_cast<const __m128i*>(zero)), _mm_load_si128(reinterpret_cast<const __m128i*>(extracted)), 0x5); break;
+      case 0x6: resReg = _mm_blend_epi32(_mm_load_si128(reinterpret_cast<const __m128i*>(zero)), _mm_load_si128(reinterpret_cast<const __m128i*>(extracted)), 0x6); break;
+      case 0x7: resReg = _mm_blend_epi32(_mm_load_si128(reinterpret_cast<const __m128i*>(zero)), _mm_load_si128(reinterpret_cast<const __m128i*>(extracted)), 0x7); break;
+      case 0x8: resReg = _mm_blend_epi32(_mm_load_si128(reinterpret_cast<const __m128i*>(zero)), _mm_load_si128(reinterpret_cast<const __m128i*>(extracted)), 0x8); break;
+      case 0x9: resReg = _mm_blend_epi32(_mm_load_si128(reinterpret_cast<const __m128i*>(zero)), _mm_load_si128(reinterpret_cast<const __m128i*>(extracted)), 0x9); break;
+      case 0xA: resReg = _mm_blend_epi32(_mm_load_si128(reinterpret_cast<const __m128i*>(zero)), _mm_load_si128(reinterpret_cast<const __m128i*>(extracted)), 0xA); break;
+      case 0xB: resReg = _mm_blend_epi32(_mm_load_si128(reinterpret_cast<const __m128i*>(zero)), _mm_load_si128(reinterpret_cast<const __m128i*>(extracted)), 0xB); break;
+      case 0xC: resReg = _mm_blend_epi32(_mm_load_si128(reinterpret_cast<const __m128i*>(zero)), _mm_load_si128(reinterpret_cast<const __m128i*>(extracted)), 0xC); break;
+      case 0xD: resReg = _mm_blend_epi32(_mm_load_si128(reinterpret_cast<const __m128i*>(zero)), _mm_load_si128(reinterpret_cast<const __m128i*>(extracted)), 0xD); break;
+      case 0xE: resReg = _mm_blend_epi32(_mm_load_si128(reinterpret_cast<const __m128i*>(zero)), _mm_load_si128(reinterpret_cast<const __m128i*>(extracted)), 0xE); break;
+      case 0xF: resReg = _mm_blend_epi32(_mm_load_si128(reinterpret_cast<const __m128i*>(zero)), _mm_load_si128(reinterpret_cast<const __m128i*>(extracted)), 0xF); break;
+    }
+    _mm_store_si128(reinterpret_cast<__m128i*>(result), resReg);
+
+    for (uint32_t i = 0u; i < 4u; i++) {
+      compositeOp.addOperand(result[i]);
+    }
+#else
     for (uint32_t i = 0u; i < 4u; i++) {
       if (i < type.getVectorSize() && (formatInfo->componentMask & (1u << i)))
         compositeOp.addOperand(emitExtractVector(builder, a, i, 1u));
       else
         compositeOp.addOperand(builder.makeConstantZero(type.getBaseType()));
     }
+#endif
 
     return builder.add(std::move(compositeOp));
   }

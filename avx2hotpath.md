@@ -134,11 +134,14 @@ __m256 trans23 = _mm256_permutevar8x32_ps(t1, perm_idx);
 
 ### Priority 6: Meta Shader Clear Operations (Medium Impact)
 
-**File:** `src/dxvk/dxvk_meta_clear.cpp`
+**Files:** `src/dxvk/dxvk_meta_clear.cpp`, `src/dxvk/dxvk_shader_builtin.cpp`
 
-**Recommended Fix:**
-- Use `_mm256_blend_epi32` for selective component masking in `emitFormatVector`.
-- Process multiple view types in parallel for workgroup size calculations.
+**Status:** ✅ AVX2 implementation complete
+
+**Implemented:**
+- `determineWorkgroupSize()`: Parallel matching of `VkImageViewType` against a 256-bit candidates vector using `_mm256_cmpeq_epi32` and `bit::tzcnt` table lookup. Replaces the original switch-case with a branchless SIMD search.
+- `emitFormatVector()`: Branchless blend of active/zero vector lanes using `_mm_blend_epi32` with a 16-entry switch-case jump table keyed by `activeMask`. Safely avoids out-of-bounds `emitExtractVector` calls.
+- Both files compiled as separate SIMD static libraries under `dxvk_experimental_simd`.
 
 ---
 
@@ -165,10 +168,14 @@ __m256 trans23 = _mm256_permutevar8x32_ps(t1, perm_idx);
 
 ### Priority 9: Pipeline Manager Hash Table (Medium Impact)
 
-**File:** `src/dxvk/dxvk_pipemanager.cpp`
+**File:** `src/dxvk/dxvk_graphics.h`
 
-**Recommended Fix:**
-- Batch lookup 4 pipeline keys simultaneously in multi-draw command paths.
+**Status:** ✅ AVX2 implementation complete
+
+**Implemented:**
+- `DxvkGraphicsPipelineShaders::eq()`: Replaced with `std::memcmp` (compiled to optimized vector load/compare instructions). Layout-safe because `Rc<T>` is a single-pointer wrapper (no padding in 5-pointer struct).
+- `DxvkGraphicsPipelineShaders::hash()`: Uses `_mm256_loadu_si256` to load the first 4 `Rc<DxvkShader>` pointers in parallel, extracts cookies with null checks, packs into `uint64_t` blocks, and feeds directly into `DxvkHashState`.
+- `dxvk_pipemanager.cpp` compiled as a separate SIMD static library under `dxvk_experimental_simd`.
 
 ---
 

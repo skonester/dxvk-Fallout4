@@ -2,6 +2,7 @@
 #include <utility>
 
 #include "dxvk_allocator.h"
+#include "../util/util_simd_perf.h"
 
 #include "../util/util_bit.h"
 #include "../util/util_likely.h"
@@ -245,6 +246,9 @@ namespace dxvk {
 
 
   void DxvkPageAllocator::getPageAllocationMask(uint32_t chunkIndex, uint32_t* pageMask) const {
+#if defined(__AVX2__)
+    DXVK_SIMD_PERF_SCOPE(MemoryOps);
+#endif
     // Initialize bit mask with all ones
     const auto& chunk = m_chunks[chunkIndex];
 

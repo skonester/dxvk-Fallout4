@@ -8,6 +8,7 @@
 #include "./com/com_include.h"
 
 #include "util_bit.h"
+#include "util_simd_perf.h"
 #include "util_likely.h"
 
 #if defined(__AVX2__)
@@ -113,6 +114,7 @@ namespace dxvk::str {
   template<typename S>
   size_t length(const S* string) {
 #if defined(__AVX2__)
+    DXVK_SIMD_PERF_SCOPE(MiscOps);
     if constexpr (sizeof(S) == 1) {
       auto ptr = reinterpret_cast<const uint8_t*>(string);
       size_t result = 0;
@@ -191,6 +193,7 @@ namespace dxvk::str {
     auto srcEnd = srcBegin + srcLength;
 
 #if defined(__AVX2__)
+    DXVK_SIMD_PERF_SCOPE(MiscOps);
     if constexpr (sizeof(S) == 1 && sizeof(D) == 2) {
       while (srcBegin + 16 <= srcEnd && (!dstBegin || totalLength + 16 <= dstLength)) {
         __m128i chars = _mm_loadu_si128(reinterpret_cast<const __m128i*>(srcBegin));

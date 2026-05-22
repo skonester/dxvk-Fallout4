@@ -6,6 +6,7 @@
 
 #include "dxvk_format.h"
 #include "dxvk_util.h"
+#include "../util/util_simd_perf.h"
 
 namespace dxvk::util {
   
@@ -69,6 +70,9 @@ namespace dxvk::util {
     if (directCopy) {
       std::memcpy(dstData, srcData, bytesTotal);
     } else {
+      #if defined(__AVX2__)
+      DXVK_SIMD_PERF_SCOPE(ImagePacking);
+      #endif
       for (uint32_t i = 0; i < blockCount.depth; i++) {
         for (uint32_t j = 0; j < blockCount.height; j++) {
 #if defined(__AVX2__)
@@ -150,6 +154,9 @@ namespace dxvk::util {
             default: ;
           }
         } else {
+          #if defined(__AVX2__)
+          DXVK_SIMD_PERF_SCOPE(ImagePacking);
+          #endif
           for (uint32_t i = 0; i < blockCount.depth; i++) {
             for (uint32_t j = 0; j < blockCount.height; j++) {
 #if defined(__AVX2__)

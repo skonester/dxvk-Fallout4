@@ -6,6 +6,7 @@
 #include <unordered_map>
 
 #include "util_bit.h"
+#include "util_simd_perf.h"
 #if defined(__AVX2__)
 #include <immintrin.h>
 #endif
@@ -21,6 +22,7 @@ namespace dxvk {
     void insert(T value) {
 #if defined(__AVX2__)
       if constexpr (UseRecentCache) {
+        DXVK_SIMD_PERF_SCOPE(MiscOps);
         uint32_t recentIndex = findRecent(value);
 
         if (recentIndex < m_recentCount) {
@@ -87,6 +89,7 @@ namespace dxvk {
     void touch(const T& value) {
 #if defined(__AVX2__)
       if constexpr (UseRecentCache) {
+        DXVK_SIMD_PERF_SCOPE(MiscOps);
         uint32_t recentIndex = findRecent(value);
 
         if (recentIndex < m_recentCount) {

@@ -22,6 +22,8 @@ dxvk_shaders = files([
   'hud/shaders/hud_graph_frag.frag',
   'hud/shaders/hud_graph_vert.vert',
 
+  'hud/shaders/hud_simd_graph_frag.frag',
+
   'hud/shaders/hud_text_frag.frag',
   'hud/shaders/hud_text_vert.vert',
 ])
@@ -54,19 +56,16 @@ dxvk_src = [
   'dxvk_latency_reflex.cpp',
   'dxvk_memory.cpp',
   'dxvk_meta_blit.cpp',
-  'dxvk_meta_clear.cpp',
   'dxvk_meta_copy.cpp',
   'dxvk_meta_mipgen.cpp',
   'dxvk_meta_resolve.cpp',
   'dxvk_options.cpp',
   'dxvk_pipelayout.cpp',
-  'dxvk_pipemanager.cpp',
   'dxvk_platform_exts.cpp',
   'dxvk_presenter.cpp',
   'dxvk_queue.cpp',
   'dxvk_sampler.cpp',
   'dxvk_shader.cpp',
-  'dxvk_shader_builtin.cpp',
   'dxvk_shader_cache.cpp',
   'dxvk_shader_io.cpp',
   'dxvk_shader_ir.cpp',
@@ -140,9 +139,50 @@ if get_option('dxvk_experimental_simd')
     cpp_args            : dxvk_experimental_simd_args,
   )
 
-  dxvk_link_libs += [ dxvk_allocator_lib, dxvk_constant_state_lib, dxvk_descriptor_info_lib, dxvk_util_lib, dxvk_stats_lib, dxvk_shader_key_lib ]
+  dxvk_meta_clear_lib = static_library('dxvk_meta_clear_simd', files('dxvk_meta_clear.cpp'),
+    dependencies        : [ dxbc_spirv_dep, vkcommon_dep ] + dxvk_extra_deps,
+    include_directories : [ dxvk_include_path ],
+    link_with           : dxvk_link_libs,
+    cpp_args            : dxvk_experimental_simd_args,
+  )
+
+  dxvk_pipemanager_lib = static_library('dxvk_pipemanager_simd', files('dxvk_pipemanager.cpp'),
+    dependencies        : [ dxbc_spirv_dep, vkcommon_dep ] + dxvk_extra_deps,
+    include_directories : [ dxvk_include_path ],
+    link_with           : dxvk_link_libs,
+    cpp_args            : dxvk_experimental_simd_args,
+  )
+
+  dxvk_shader_builtin_lib = static_library('dxvk_shader_builtin_simd', files('dxvk_shader_builtin.cpp'),
+    dependencies        : [ dxbc_spirv_dep, vkcommon_dep ] + dxvk_extra_deps,
+    include_directories : [ dxvk_include_path ],
+    link_with           : dxvk_link_libs,
+    cpp_args            : dxvk_experimental_simd_args,
+  )
+
+  dxvk_link_libs += [
+    dxvk_allocator_lib,
+    dxvk_constant_state_lib,
+    dxvk_descriptor_info_lib,
+    dxvk_util_lib,
+    dxvk_stats_lib,
+    dxvk_shader_key_lib,
+    dxvk_meta_clear_lib,
+    dxvk_pipemanager_lib,
+    dxvk_shader_builtin_lib
+  ]
 else
-  dxvk_src += [ 'dxvk_allocator.cpp', 'dxvk_constant_state.cpp', 'dxvk_descriptor_info.cpp', 'dxvk_util.cpp', 'dxvk_stats.cpp', 'dxvk_shader_key.cpp' ]
+  dxvk_src += [
+    'dxvk_allocator.cpp',
+    'dxvk_constant_state.cpp',
+    'dxvk_descriptor_info.cpp',
+    'dxvk_util.cpp',
+    'dxvk_stats.cpp',
+    'dxvk_shader_key.cpp',
+    'dxvk_meta_clear.cpp',
+    'dxvk_pipemanager.cpp',
+    'dxvk_shader_builtin.cpp'
+  ]
 endif
 
 dxvk_lib = static_library('dxvk', dxvk_src, glsl_generator.process(dxvk_shaders), dxvk_version,

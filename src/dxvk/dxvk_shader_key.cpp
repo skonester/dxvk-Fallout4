@@ -1,4 +1,5 @@
 #include "dxvk_shader_key.h"
+#include "../util/util_simd_perf.h"
 
 #if defined(__AVX2__)
 #include <cstring>
@@ -74,6 +75,7 @@ namespace dxvk {
 
   bool DxvkShaderHash::eq(const DxvkShaderHash& other) const {
 #if defined(__AVX2__)
+    DXVK_SIMD_PERF_SCOPE(ShaderOps);
     return std::memcmp(this, &other, sizeof(DxvkShaderHash)) == 0;
 #else
     bool eq = m_stage == other.m_stage
@@ -90,6 +92,7 @@ namespace dxvk {
 
   size_t DxvkShaderHash::hash() const {
 #if defined(__AVX2__)
+    DXVK_SIMD_PERF_SCOPE(ShaderOps);
     DxvkHashState hash = { };
     
     uint64_t meta;

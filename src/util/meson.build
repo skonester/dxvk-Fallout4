@@ -8,6 +8,7 @@ util_src = files([
   'util_luid.cpp',
   'util_shared_res.cpp',
   'util_sleep.cpp',
+  'util_simd_perf.cpp',
 
   'thread.cpp',
 

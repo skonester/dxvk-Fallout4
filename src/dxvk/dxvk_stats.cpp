@@ -1,4 +1,5 @@
 #include "dxvk_stats.h"
+#include "../util/util_simd_perf.h"
 
 #if defined(__AVX2__)
 #include <immintrin.h>
@@ -19,6 +20,7 @@ namespace dxvk {
   DxvkStatCounters DxvkStatCounters::diff(const DxvkStatCounters& other) const {
     DxvkStatCounters result;
 #if defined(__AVX2__)
+    DXVK_SIMD_PERF_SCOPE(MiscOps);
     uint64_t* dst = result.m_counters.data();
     const uint64_t* src1 = m_counters.data();
     const uint64_t* src2 = other.m_counters.data();
@@ -43,6 +45,7 @@ namespace dxvk {
   
   void DxvkStatCounters::merge(const DxvkStatCounters& other) {
 #if defined(__AVX2__)
+    DXVK_SIMD_PERF_SCOPE(MiscOps);
     uint64_t* dst = m_counters.data();
     const uint64_t* src = other.m_counters.data();
     size_t i = 0;
@@ -65,6 +68,7 @@ namespace dxvk {
   
   void DxvkStatCounters::reset() {
 #if defined(__AVX2__)
+    DXVK_SIMD_PERF_SCOPE(MiscOps);
     uint64_t* dst = m_counters.data();
     __m256i zero = _mm256_setzero_si256();
     size_t i = 0;

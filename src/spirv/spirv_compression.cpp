@@ -1,4 +1,5 @@
 #include "spirv_compression.h"
+#include "../util/util_simd_perf.h"
 
 #if defined(__AVX2__)
 #include <immintrin.h>
@@ -98,6 +99,7 @@ namespace dxvk {
     uint32_t dstOffset = 0;
 
 #if defined(__AVX2__)
+    DXVK_SIMD_PERF_SCOPE(SpirvDecompress);
     const __m256i shift_schema_vec0 = _mm256_setr_epi32(0, 2, 4, 6, 8, 10, 12, 14);
     const __m256i shift_schema_vec1 = _mm256_setr_epi32(16, 18, 20, 22, 24, 26, 28, 30);
     const __m256i mask_table = _mm256_setr_epi32(

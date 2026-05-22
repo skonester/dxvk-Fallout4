@@ -10,6 +10,12 @@
 #include <hud_graph_frag.h>
 #include <hud_graph_vert.h>
 
+#if DXVK_SIMD_PERF
+#include <hud_simd_graph_frag.h>
+#endif
+
+#include "../../util/util_string.h"
+
 #include <iomanip>
 #include <version.h>
 
@@ -1463,5 +1469,213 @@ namespace dxvk::hud {
     position.y += 8;
     return position;
   }
+
+#if DXVK_SIMD_PERF
+  HudSimdPerfItem::HudSimdPerfItem(
+    const Rc<DxvkDevice>&     device,
+          HudRenderer*        renderer,
+          bool                showGraph,
+          bool                showBreakdown)
+  : m_device(device),
+    m_showGraph(showGraph),
+    m_showBreakdown(showBreakdown) {
+    m_ticksToMicroseconds = 1.0 / double(calibrateRdtscFrequency());
+  }
+
+  HudSimdPerfItem::~HudSimdPerfItem() {
+
+  }
+
+  void HudSimdPerfItem::update(dxvk::high_resolution_clock::time_point time) {
+    auto accumulator = snapshotSimdPerf();
+
+    // Sum all zones for total
+    uint64_t totalCycles = 0;
+    for (uint32_t i = 0; i < uint32_t(SimdPerfZone::Count); i++) {
+      m_zoneAccum[i] += accumulator.cycles[i];
+      totalCycles += accumulator.cycles[i];
+    }
+
+    // Convert to microseconds
+    float us = float(totalCycles * m_ticksToMicroseconds);
+    m_dataPoints[m_dataIndex++ % NumDataPoints] = us;
+    m_frameCount++;
+
+    // Update display every 500ms (approximately 30 frames at 60fps)
+    if (m_frameCount >= 30) {
+      for (uint32_t i = 0; i < uint32_t(SimdPerfZone::Count); i++) {
+        m_zoneDisplay[i] = m_zoneAccum[i] / m_frameCount;
+        m_zoneAccum[i] = 0;
+      }
+      m_frameCount = 0;
+    }
+  }
+
+  HudPos HudSimdPerfItem::render(
+    const Rc<DxvkCommandList>&ctx,
+    const HudPipelineKey&     key,
+    const HudOptions&         options,
+          HudRenderer&        renderer,
+          HudPos              position) {
+    // Draw text header
+    position.y += 16;
+    renderer.drawText(16, position, 0xff40ff40u, "SIMD:");
+
+    // Calculate total and display
+    uint64_t totalCycles = 0;
+    for (uint32_t i = 0; i < uint32_t(SimdPerfZone::Count); i++)
+      totalCycles += m_zoneDisplay[i];
+
+    float totalUs = float(totalCycles * m_ticksToMicroseconds);
+    renderer.drawText(16, { position.x + 80, position.y }, 0xffffffffu,
+      str::format(totalUs, " µs/frame"));
+
+    position.y += 20;
+
+    if (m_showGraph) {
+      // Create resources if needed
+      if (!m_dataBuffer) {
+        createResources(ctx);
+      } else {
+        auto allocation = m_dataBuffer->assignStorage(m_dataBuffer->allocateStorage());
+        ctx->track(std::move(allocation));
+      }
+
+      // Upload the CPU-side data points
+      std::memcpy(m_dataBuffer->mapPtr(0), m_dataPoints.data(), m_dataPoints.size() * sizeof(float));
+
+      // Place the graph inline relative to the top-left
+      HudPos graphPos = { position.x, position.y };
+      HudPos graphSize = { NumDataPoints, 80 };
+
+      DxvkDescriptorWrite descriptorWrite;
+      descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+      descriptorWrite.buffer = m_dataBuffer->getSliceInfo(0u, m_dataPoints.size() * sizeof(float));
+
+      // Calculate frameIndex (most recently written data point index)
+      uint32_t frameIndex = (m_dataIndex + NumDataPoints - 1) % NumDataPoints;
+
+      RenderPushConstants pushConstants = { };
+      pushConstants.hud = renderer.getPushConstants();
+      pushConstants.x = graphPos.x;
+      pushConstants.y = graphPos.y;
+      pushConstants.w = graphSize.x;
+      pushConstants.h = graphSize.y;
+      pushConstants.frameIndex = frameIndex;
+
+      ctx->cmdBindPipeline(DxvkCmdBuffer::ExecBuffer,
+        VK_PIPELINE_BIND_POINT_GRAPHICS, getPipeline(renderer, key));
+
+      ctx->bindResources(DxvkCmdBuffer::ExecBuffer,
+        m_pipelineLayout, 1u, &descriptorWrite,
+        sizeof(pushConstants), &pushConstants);
+
+      ctx->cmdDraw(4, 1, 0, 0);
+
+      ctx->track(m_dataBuffer, DxvkAccess::Read);
+
+      // Advance position past the graph
+      position.y += graphSize.y + 12;
+    }
+
+    if (m_showBreakdown) {
+      // Draw zone breakdown
+      const char* zoneNames[] = {
+        "Matrix", "SpirvDec", "ImagePack", "Descriptor",
+        "Shader", "Pipeline", "Memory", "Misc"
+      };
+
+      for (uint32_t i = 0; i < uint32_t(SimdPerfZone::Count); i++) {
+        if (m_zoneDisplay[i] == 0) continue;
+
+        float zoneUs = float(m_zoneDisplay[i] * m_ticksToMicroseconds);
+        renderer.drawText(32, position, 0xff808080u,
+          str::format(zoneNames[i], ": ", zoneUs, " µs"));
+        position.y += 16;
+      }
+
+      position.y += 8;
+    }
+
+    return position;
+  }
+
+  void HudSimdPerfItem::createResources(
+    const Rc<DxvkCommandList>&ctx) {
+    DxvkBufferCreateInfo bufInfo = { };
+    bufInfo.size = NumDataPoints * sizeof(float);
+    bufInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    bufInfo.stages = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    bufInfo.access = VK_ACCESS_SHADER_READ_BIT;
+    bufInfo.debugName = "HUD SIMD data";
+
+    m_dataBuffer = m_device->createBuffer(bufInfo,
+      VK_MEMORY_HEAP_DEVICE_LOCAL_BIT |
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    // Zero-init buffer
+    std::memset(m_dataBuffer->mapPtr(0), 0, bufInfo.size);
+
+    m_pipelineLayout = createPipelineLayout();
+  }
+
+  VkPipeline HudSimdPerfItem::getPipeline(
+          HudRenderer&        renderer,
+    const HudPipelineKey&     key) {
+    auto entry = m_gfxPipelines.find(key);
+
+    if (entry != m_gfxPipelines.end())
+      return entry->second;
+
+    VkPipeline pipeline = createPipeline(renderer, key);
+    m_gfxPipelines.insert({ key, pipeline });
+    return pipeline;
+  }
+
+  VkPipeline HudSimdPerfItem::createPipeline(
+          HudRenderer&        renderer,
+    const HudPipelineKey&     key) {
+    auto vk = m_device->vkd();
+
+    HudSpecConstants specConstants = renderer.getSpecConstants(key);
+    VkSpecializationInfo specInfo = renderer.getSpecInfo(&specConstants);
+
+    VkPipelineInputAssemblyStateCreateInfo iaState = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+    iaState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+
+    VkPipelineColorBlendAttachmentState cbAttachment = { };
+    cbAttachment.blendEnable = VK_TRUE;
+    cbAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+    cbAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    cbAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+    cbAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    cbAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    cbAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+    cbAttachment.colorWriteMask =
+      VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+    util::DxvkBuiltInGraphicsState state = { };
+    state.iaState = &iaState;
+    state.colorFormats[0] = key.format;
+    state.cbAttachment = &cbAttachment;
+
+    state.vs = util::DxvkBuiltInShaderStage(hud_graph_vert, nullptr);
+    state.fs = util::DxvkBuiltInShaderStage(hud_simd_graph_frag, &specInfo);
+
+    return m_device->createBuiltInGraphicsPipeline(m_pipelineLayout, state);
+  }
+
+  const DxvkPipelineLayout* HudSimdPerfItem::createPipelineLayout() {
+    static const std::array<DxvkDescriptorSetLayoutBinding, 1> bindings = {{
+      { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT },
+    }};
+
+    return m_device->createBuiltInPipelineLayout(0u,
+      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+      sizeof(RenderPushConstants), bindings.size(), bindings.data());
+  }
+#endif
 
 }

@@ -2,12 +2,18 @@
 
 #include <mutex>
 
+#if defined(__AVX2__)
+#include <cstring>
+#include <immintrin.h>
+#endif
+
 #include "dxvk_bind_mask.h"
 #include "dxvk_constant_state.h"
 #include "dxvk_graphics_state.h"
 #include "dxvk_pipelayout.h"
 #include "dxvk_renderpass.h"
 #include "dxvk_shader.h"
+#include "../util/util_simd_perf.h"
 #include "dxvk_stats.h"
 
 namespace dxvk {
@@ -304,12 +310,42 @@ namespace dxvk {
     Rc<DxvkShader> fs;
 
     bool eq(const DxvkGraphicsPipelineShaders& other) const {
+#if defined(__AVX2__)
+      DXVK_SIMD_PERF_SCOPE(PipelineOps);
+      return std::memcmp(this, &other, sizeof(DxvkGraphicsPipelineShaders)) == 0;
+#else
       return vs == other.vs && tcs == other.tcs
           && tes == other.tes && gs == other.gs
           && fs == other.fs;
+#endif
     }
 
     size_t hash() const {
+#if defined(__AVX2__)
+      DXVK_SIMD_PERF_SCOPE(PipelineOps);
+      __m256i ptrs03 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(this));
+      uint64_t ptr_fs;
+      std::memcpy(&ptr_fs, reinterpret_cast<const char*>(this) + 32, sizeof(ptr_fs));
+
+      alignas(32) uint64_t ptrs[4];
+      _mm256_store_si256(reinterpret_cast<__m256i*>(ptrs), ptrs03);
+
+      uint32_t c_vs  = ptrs[0] ? reinterpret_cast<const DxvkShader*>(ptrs[0])->getCookie()  : 0;
+      uint32_t c_tcs = ptrs[1] ? reinterpret_cast<const DxvkShader*>(ptrs[1])->getCookie() : 0;
+      uint32_t c_tes = ptrs[2] ? reinterpret_cast<const DxvkShader*>(ptrs[2])->getCookie() : 0;
+      uint32_t c_gs  = ptrs[3] ? reinterpret_cast<const DxvkShader*>(ptrs[3])->getCookie()  : 0;
+      uint32_t c_fs  = ptr_fs  ? reinterpret_cast<const DxvkShader*>(ptr_fs)->getCookie()  : 0;
+
+      uint64_t v0 = (uint64_t(c_vs) << 32) | c_tcs;
+      uint64_t v1 = (uint64_t(c_tes) << 32) | c_gs;
+      uint64_t v2 = c_fs;
+
+      DxvkHashState state;
+      state.add(v0);
+      state.add(v1);
+      state.add(v2);
+      return state;
+#else
       DxvkHashState state;
       if constexpr (sizeof(size_t) >= 8) {
         state.add((uint64_t(DxvkShader::getCookie(vs)) << 32) | DxvkShader::getCookie(tcs));
@@ -323,6 +359,7 @@ namespace dxvk {
         state.add(DxvkShader::getCookie(fs));
       }
       return state;
+#endif
     }
 
     bool validate() const {

@@ -1,6 +1,11 @@
 #include "dxvk_shader_builtin.h"
 #include "dxvk_meta_clear.h"
 #include "dxvk_device.h"
+#include "../util/util_simd_perf.h"
+
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
 
 namespace dxvk {
   
@@ -33,6 +38,35 @@ namespace dxvk {
 
 
   VkExtent3D DxvkMetaClearObjects::determineWorkgroupSize(const DxvkMetaClear::Key& key) const {
+#if defined(__AVX2__)
+    DXVK_SIMD_PERF_SCOPE(ShaderOps);
+    const __m256i candidates = _mm256_setr_epi32(
+      VK_IMAGE_VIEW_TYPE_1D,
+      VK_IMAGE_VIEW_TYPE_1D_ARRAY,
+      VK_IMAGE_VIEW_TYPE_2D,
+      VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+      VK_IMAGE_VIEW_TYPE_3D,
+      VK_IMAGE_VIEW_TYPE_MAX_ENUM,
+      -1, -1
+    );
+    __m256i vt = _mm256_set1_epi32(key.viewType);
+    __m256i cmp = _mm256_cmpeq_epi32(vt, candidates);
+    uint32_t mask = uint32_t(_mm256_movemask_ps(_mm256_castsi256_ps(cmp))) & 0x3FU;
+    if (mask != 0) {
+      static const VkExtent3D s_lookupTable[] = {
+        { 64u, 1u, 1u }, // VK_IMAGE_VIEW_TYPE_1D
+        { 64u, 1u, 1u }, // VK_IMAGE_VIEW_TYPE_1D_ARRAY
+        { 8u,  8u, 1u }, // VK_IMAGE_VIEW_TYPE_2D
+        { 8u,  8u, 1u }, // VK_IMAGE_VIEW_TYPE_2D_ARRAY
+        { 4u,  4u, 4u }, // VK_IMAGE_VIEW_TYPE_3D
+        { 64u, 1u, 1u }  // VK_IMAGE_VIEW_TYPE_MAX_ENUM
+      };
+      return s_lookupTable[bit::tzcnt(mask)];
+    } else {
+      Logger::err(str::format("DxvkMetaClearObjects: Unhandled view type: ", key.viewType));
+      return { 64u, 1u, 1u };
+    }
+#else
     // Pick workgroup size in such a way that we get reasonably
     // efficient access patterns while keeping workgroups small.
     VkExtent3D workgroupSize = { 64u, 1u, 1u };
@@ -65,6 +99,7 @@ namespace dxvk {
     }
 
     return workgroupSize;
+#endif
   }
 
 

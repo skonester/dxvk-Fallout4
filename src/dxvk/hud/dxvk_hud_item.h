@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "../../util/util_time.h"
+#include "../../util/util_simd_perf.h"
 
 #include "../dxvk_gpu_query.h"
 
@@ -776,5 +777,80 @@ namespace dxvk::hud {
       = dxvk::high_resolution_clock::now();
 
   };
+
+#if DXVK_SIMD_PERF
+  /**
+   * \brief HUD item to display SIMD performance
+   */
+  class HudSimdPerfItem : public HudItem {
+    static constexpr uint32_t NumDataPoints = 300;
+    static constexpr uint64_t UpdateInterval = 500'000;
+  public:
+
+    HudSimdPerfItem(
+      const Rc<DxvkDevice>&     device,
+            HudRenderer*        renderer,
+            bool                showGraph,
+            bool                showBreakdown);
+
+    ~HudSimdPerfItem();
+
+    void update(dxvk::high_resolution_clock::time_point time) override;
+
+    HudPos render(
+      const Rc<DxvkCommandList>&ctx,
+      const HudPipelineKey&     key,
+      const HudOptions&         options,
+            HudRenderer&        renderer,
+            HudPos                position) override;
+
+  private:
+
+    struct RenderPushConstants {
+      HudPushConstants hud;
+      int16_t x;
+      int16_t y;
+      int16_t w;
+      int16_t h;
+      uint32_t frameIndex;
+    };
+
+    Rc<DxvkDevice>            m_device;
+    bool                      m_showGraph;
+    bool                      m_showBreakdown;
+
+    // CPU-side ring buffer of per-frame total SIMD µs
+    std::array<float, NumDataPoints> m_dataPoints = {};
+    uint32_t m_dataIndex = 0;
+
+    // Per-zone breakdown (updated every 500ms)
+    std::array<uint64_t, uint32_t(SimdPerfZone::Count)> m_zoneAccum = {};
+    std::array<uint64_t, uint32_t(SimdPerfZone::Count)> m_zoneDisplay = {};
+    uint32_t m_frameCount = 0;
+
+    // RDTSC calibration
+    double m_ticksToMicroseconds = 0.0;
+
+    // GPU resources for graph
+    Rc<DxvkBuffer> m_dataBuffer;
+    const DxvkPipelineLayout* m_pipelineLayout = nullptr;
+    std::unordered_map<HudPipelineKey,
+      VkPipeline, DxvkHash, DxvkEq> m_gfxPipelines;
+
+    void createResources(
+      const Rc<DxvkCommandList>&ctx);
+
+    VkPipeline getPipeline(
+            HudRenderer&        renderer,
+      const HudPipelineKey&     key);
+
+    VkPipeline createPipeline(
+            HudRenderer&        renderer,
+      const HudPipelineKey&     key);
+
+    const DxvkPipelineLayout* createPipelineLayout();
+
+  };
+#endif
 
 }

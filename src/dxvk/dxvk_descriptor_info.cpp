@@ -4,6 +4,7 @@
 #include "dxvk_device.h"
 
 #include "../util/util_bit.h"
+#include "../util/util_simd_perf.h"
 
 #if defined(__AVX2__)
   #include <immintrin.h>
@@ -321,6 +322,9 @@ namespace dxvk {
           void*                       dst,
     const DxvkDescriptor**            descriptor,
     const DxvkDescriptorUpdateRange&  range) {
+    #if defined(__AVX2__)
+    DXVK_SIMD_PERF_SCOPE(DescriptorOps);
+    #endif
     static_assert((Size & 31u) == 0u);
 
     auto dstPtr = reinterpret_cast<char*>(dst) + range.dstOffset;
@@ -346,6 +350,7 @@ namespace dxvk {
 
     size_t Remainder = Size;
     #if defined(__AVX2__)
+    DXVK_SIMD_PERF_SCOPE(DescriptorOps);
     if (reinterpret_cast<uintptr_t>(dstPtr) % 32u == 0) {
       for (size_t i = 0u; i < Size / 32u; i++) {
         clear_nontemporal<32u>(dstPtr);
@@ -378,6 +383,7 @@ namespace dxvk {
 
     size_t Remainder = range.descriptorSize;
     #if defined(__AVX2__)
+    DXVK_SIMD_PERF_SCOPE(DescriptorOps);
     if (reinterpret_cast<uintptr_t>(dstPtr) % 32u == 0) {
       for (size_t i = 0u; i < range.descriptorSize / 32u; i++) {
         clear_nontemporal<32u>(dstPtr);

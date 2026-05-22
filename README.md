@@ -114,3 +114,9 @@ An optimized `dxvk.conf` configuration template is provided at the root and unde
 * **Resource Caching (`d3d11.cachedDynamicResources = a`):** Caches dynamic Constant, Vertex, and Index buffers to significantly alleviate driver and CPU rendering bottlenecks.
 * **Relaxed Barriers (`d3d11.relaxedBarriers = True`):** Enables GPU pipeline overlap for optimized command execution.
 * **Async Shader Compilation (`dxvk.numCompilerThreads = 0`):** Instructs the compiler to utilize all available CPU threads for background shader compilation, avoiding stuttering when loading new graphics assets.
+* **HUD Overlay Configuration (`dxvk.hud = ...`):** Configures display overlay items. You can customize the experimental SIMD performance HUD components:
+  - `dxvk.hud = simd` shows the header text, the transparent sparkline graph, and the detailed zone breakdown.
+  - `dxvk.hud = simd,simd_graph=0` hides the sparkline graph, showing only the text stats.
+  - `dxvk.hud = simd,simd_breakdown=0` hides the detailed zone breakdown, showing only the header and the graph.
+  - `dxvk.hud = fps,simd` displays both the FPS counter and the SIMD performance item.
+

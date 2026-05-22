@@ -1,4 +1,5 @@
 #include "util_matrix.h"
+#include "util_simd_perf.h"
 
 #if defined(__AVX2__) || defined(__FMA__)
   #include <immintrin.h>
@@ -191,6 +192,7 @@ namespace dxvk {
 
   Matrix4 transpose(const Matrix4& m) {
     #if defined(__AVX2__)
+    DXVK_SIMD_PERF_SCOPE(MatrixOps);
     __m256 m01 = _mm256_loadu_ps(m[0].data);
     __m256 m23 = _mm256_loadu_ps(m[2].data);
 
@@ -218,6 +220,7 @@ namespace dxvk {
 
   float determinant(const Matrix4& m) {
     #if defined(__AVX2__)
+    DXVK_SIMD_PERF_SCOPE(MatrixOps);
     const __m256 a = _mm256_setr_ps(m[2][2], m[2][1], m[2][1], m[2][0], m[2][0], m[2][0], 0.0f, 0.0f);
     const __m256 b = _mm256_setr_ps(m[3][3], m[3][3], m[3][2], m[3][3], m[3][2], m[3][1], 0.0f, 0.0f);
     const __m256 c = _mm256_setr_ps(m[3][2], m[3][1], m[3][1], m[3][0], m[3][0], m[3][0], 0.0f, 0.0f);
@@ -296,6 +299,7 @@ namespace dxvk {
   Matrix4 inverse(const Matrix4& m)
   {
     #if defined(__AVX2__)
+    DXVK_SIMD_PERF_SCOPE(MatrixOps);
     // We define the elements for L0, R0, L1, R1 for the 3 groups
     // Group 0: fac0 and fac1
     const __m256 L0_01 = _mm256_setr_ps(

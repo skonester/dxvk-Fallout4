@@ -1,4 +1,5 @@
 #include "dxvk_constant_state.h"
+#include "../util/util_simd_perf.h"
 
 #if defined(__AVX2__)
 #include <immintrin.h>
@@ -23,6 +24,7 @@ namespace dxvk {
             VkBlendFactor alphaDstFactor,
             VkBlendOp     alphaBlendOp) {
 #if defined(__AVX2__)
+      DXVK_SIMD_PERF_SCOPE(PipelineOps);
       const __m256i ops = _mm256_setr_epi32(
         int32_t(colorSrcFactor), int32_t(colorDstFactor), int32_t(colorBlendOp), 0,
         int32_t(alphaSrcFactor), int32_t(alphaDstFactor), int32_t(alphaBlendOp), 0);

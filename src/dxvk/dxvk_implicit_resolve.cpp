@@ -5,6 +5,7 @@
 
 #include "dxvk_device.h"
 #include "dxvk_implicit_resolve.h"
+#include "../util/util_simd_perf.h"
 
 namespace dxvk {
 
@@ -147,6 +148,7 @@ namespace dxvk {
 
     // Eliminate images that haven't been used in a long time
 #if defined(__AVX2__)
+    DXVK_SIMD_PERF_SCOPE(MiscOps);
     size_t numViews = m_resolveViews.size();
     if (numViews >= 4) {
       alignas(32) uint64_t trackIds[4];

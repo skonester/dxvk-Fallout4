@@ -378,8 +378,10 @@ namespace dxvk {
   void DxvkSwapchainBlitter::renderHudImage(
     const Rc<DxvkCommandList>&        ctx,
           VkExtent3D                  extent) {
-    if (m_hud->empty())
+    if (m_hud->empty()) {
+      destroyHudImage();
       return;
+    }
 
     if (!m_hudImage || m_hudImage->info().extent != extent)
       createHudImage(extent);

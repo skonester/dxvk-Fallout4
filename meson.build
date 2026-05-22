@@ -195,8 +195,6 @@ endif
 dxbc_spirv = subproject('dxbc-spirv')
 dxbc_spirv_dep = dxbc_spirv.get_variable('dxbc_spv_dep')
 
-dxvk_include_path = include_directories(dxvk_include_dirs)
-
 add_project_arguments(cpp.get_supported_arguments(compiler_args), language: 'cpp')
 add_project_arguments(cc.get_supported_arguments(compiler_args), language: 'c')
 add_project_link_arguments(cpp.get_supported_link_arguments(link_args), language: 'cpp')
@@ -233,11 +231,16 @@ conf_data = configuration_data()
 conf_data.set('BUILD_COMPILER', cpp.get_id())
 conf_data.set('BUILD_COMPILER_VERSION', cpp.version())
 conf_data.set('BUILD_TARGET', cpu_family)
+conf_data.set('DXVK_SIMD_PERF', get_option('dxvk_experimental_simd') ? 1 : 0)
 dxvk_buildenv = configure_file(
   configuration : conf_data,
   input:  'buildenv.h.in',
   output: 'buildenv.h',
 )
+
+# Add build directory to include path for generated buildenv.h
+# Using '.' includes both source and build directories
+dxvk_include_path = include_directories(dxvk_include_dirs + ['.'])
 
 if platform != 'windows'
   subdir('include/native')
