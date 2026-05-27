@@ -645,9 +645,48 @@ namespace dxvk::hud {
     if (elapsed.count() >= UpdateInterval) {
       m_drawCallCount   = diffCounters.getCtr(DxvkStatCounter::CmdDrawCalls);
       m_drawCount       = diffCounters.getCtr(DxvkStatCounter::CmdDrawsMerged) + m_drawCallCount;
+      m_drawSkipped     = diffCounters.getCtr(DxvkStatCounter::CmdDrawCallsSkipped);
       m_dispatchCount   = diffCounters.getCtr(DxvkStatCounter::CmdDispatchCalls);
       m_renderPassCount = diffCounters.getCtr(DxvkStatCounter::CmdRenderPassCount);
       m_barrierCount    = diffCounters.getCtr(DxvkStatCounter::CmdBarrierCount);
+      m_governorLimiterSleep = diffCounters.getCtr(DxvkStatCounter::GovernorLimiterSleepUs);
+      m_governorEarlySleep = diffCounters.getCtr(DxvkStatCounter::GovernorEarlySleepUs);
+
+      m_drawWindow[m_drawWindowIndex++ % PlateauWindow] = m_drawCount;
+      m_drawWindowCount = std::min(m_drawWindowCount + 1u, PlateauWindow);
+
+      std::array<uint64_t, PlateauWindow> sorted = m_drawWindow;
+      std::sort(sorted.begin(), sorted.begin() + m_drawWindowCount);
+
+      uint64_t sum = 0u;
+      for (uint32_t i = 0; i < m_drawWindowCount; i++)
+        sum += sorted[i];
+
+      m_drawMedian = sorted[m_drawWindowCount / 2u];
+      m_drawMean = sum / m_drawWindowCount;
+
+      uint64_t bestBucket = 0u;
+      uint32_t bestCount = 0u;
+      for (uint32_t i = 0; i < m_drawWindowCount; ) {
+        uint64_t bucket = (sorted[i] + 50u) / 100u;
+        uint32_t count = 1u;
+
+        while (i + count < m_drawWindowCount
+            && (sorted[i + count] + 50u) / 100u == bucket)
+          count += 1u;
+
+        if (count > bestCount) {
+          bestBucket = bucket;
+          bestCount = count;
+        }
+
+        i += count;
+      }
+
+      m_drawMode = bestBucket * 100u;
+      m_drawSpikePct = m_drawMedian
+        ? (100u * m_drawCount) / m_drawMedian
+        : 100u;
 
       m_lastUpdate = time;
     }
@@ -681,6 +720,29 @@ namespace dxvk::hud {
     position.y += 20;
     renderer.drawText(16, position, 0xffff8040, "Barriers:");
     renderer.drawText(16, { position.x + 192, position.y }, 0xffffffffu, str::format(m_barrierCount));
+
+    position.y += 20;
+    renderer.drawText(16, position, 0xffff8040, "Draw plateau:");
+    renderer.drawText(16, { position.x + 192, position.y }, 0xffffffffu,
+      str::format("med ", m_drawMedian, " avg ", m_drawMean));
+
+    position.y += 20;
+    renderer.drawText(16, position, 0xffff8040, "Draw mode:");
+    renderer.drawText(16, { position.x + 192, position.y }, 0xffffffffu,
+      str::format(m_drawMode, " (", m_drawSpikePct, "%)"));
+
+    if (m_governorLimiterSleep || m_governorEarlySleep) {
+      position.y += 20;
+      renderer.drawText(16, position, 0xff40d8ffu, "Governor sleep:");
+      renderer.drawText(16, { position.x + 192, position.y }, 0xffffffffu,
+        str::format(m_governorEarlySleep, " / ", m_governorLimiterSleep, " us"));
+    }
+
+    if (m_drawSkipped) {
+      position.y += 20;
+      renderer.drawText(16, position, 0xff40d8ffu, "Governor skip:");
+      renderer.drawText(16, { position.x + 192, position.y }, 0xffffffffu, str::format(m_drawSkipped));
+    }
     
     position.y += 8;
     return position;
@@ -1479,11 +1541,14 @@ namespace dxvk::hud {
   : m_device(device),
     m_showGraph(showGraph),
     m_showBreakdown(showBreakdown) {
-    m_ticksToMicroseconds = 1.0 / double(calibrateRdtscFrequency());
+    m_ticksToMicroseconds = 1'000'000.0 / double(calibrateRdtscFrequency());
   }
 
   HudSimdPerfItem::~HudSimdPerfItem() {
+    auto vk = m_device->vkd();
 
+    for (const auto& p : m_gfxPipelines)
+      vk->vkDestroyPipeline(vk->device(), p.second, nullptr);
   }
 
   void HudSimdPerfItem::update(dxvk::high_resolution_clock::time_point time) {
@@ -1501,13 +1566,22 @@ namespace dxvk::hud {
     m_dataPoints[m_dataIndex++ % NumDataPoints] = us;
     m_frameCount++;
 
-    // Update display every 500ms (approximately 30 frames at 60fps)
-    if (m_frameCount >= 30) {
+    auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(time - m_lastUpdate);
+
+    if (elapsed.count() >= UpdateInterval && m_frameCount) {
+      uint64_t displayTotal = 0u;
+
       for (uint32_t i = 0; i < uint32_t(SimdPerfZone::Count); i++) {
         m_zoneDisplay[i] = m_zoneAccum[i] / m_frameCount;
+        displayTotal += m_zoneDisplay[i];
         m_zoneAccum[i] = 0;
       }
+
+      float totalUs = float(displayTotal * m_ticksToMicroseconds);
+      m_totalString = str::format(std::fixed, std::setprecision(2), totalUs, " us");
+
       m_frameCount = 0;
+      m_lastUpdate = time;
     }
   }
 
@@ -1517,23 +1591,13 @@ namespace dxvk::hud {
     const HudOptions&         options,
           HudRenderer&        renderer,
           HudPos              position) {
-    // Draw text header
     position.y += 16;
-    renderer.drawText(16, position, 0xff40ff40u, "SIMD:");
+    renderer.drawText(16, position, 0xff40d8ffu, "SIMD:");
+    renderer.drawText(16, { position.x + 60, position.y }, 0xffffffffu, m_totalString);
 
-    // Calculate total and display
-    uint64_t totalCycles = 0;
-    for (uint32_t i = 0; i < uint32_t(SimdPerfZone::Count); i++)
-      totalCycles += m_zoneDisplay[i];
-
-    float totalUs = float(totalCycles * m_ticksToMicroseconds);
-    renderer.drawText(16, { position.x + 80, position.y }, 0xffffffffu,
-      str::format(totalUs, " µs/frame"));
-
-    position.y += 20;
+    position.y += 8;
 
     if (m_showGraph) {
-      // Create resources if needed
       if (!m_dataBuffer) {
         createResources(ctx);
       } else {
@@ -1541,18 +1605,16 @@ namespace dxvk::hud {
         ctx->track(std::move(allocation));
       }
 
-      // Upload the CPU-side data points
       std::memcpy(m_dataBuffer->mapPtr(0), m_dataPoints.data(), m_dataPoints.size() * sizeof(float));
 
-      // Place the graph inline relative to the top-left
+      position.y += 8;
       HudPos graphPos = { position.x, position.y };
-      HudPos graphSize = { NumDataPoints, 80 };
+      HudPos graphSize = { GraphWidth, GraphHeight };
 
       DxvkDescriptorWrite descriptorWrite;
       descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
       descriptorWrite.buffer = m_dataBuffer->getSliceInfo(0u, m_dataPoints.size() * sizeof(float));
 
-      // Calculate frameIndex (most recently written data point index)
       uint32_t frameIndex = (m_dataIndex + NumDataPoints - 1) % NumDataPoints;
 
       RenderPushConstants pushConstants = { };
@@ -1574,27 +1636,29 @@ namespace dxvk::hud {
 
       ctx->track(m_dataBuffer, DxvkAccess::Read);
 
-      // Advance position past the graph
-      position.y += graphSize.y + 12;
+      position.y += graphSize.y + 8;
     }
 
     if (m_showBreakdown) {
-      // Draw zone breakdown
-      const char* zoneNames[] = {
-        "Matrix", "SpirvDec", "ImagePack", "Descriptor",
-        "Shader", "Pipeline", "Memory", "Misc"
-      };
+      static constexpr std::array<const char*, uint32_t(SimdPerfZone::Count)> zoneNames = {{
+        "matrix", "spirv", "image", "desc",
+        "shader", "pipe", "memory", "misc"
+      }};
 
+      uint32_t shownZones = 0u;
       for (uint32_t i = 0; i < uint32_t(SimdPerfZone::Count); i++) {
-        if (m_zoneDisplay[i] == 0) continue;
+        if (m_zoneDisplay[i] == 0)
+          continue;
 
         float zoneUs = float(m_zoneDisplay[i] * m_ticksToMicroseconds);
-        renderer.drawText(32, position, 0xff808080u,
-          str::format(zoneNames[i], ": ", zoneUs, " µs"));
+        renderer.drawText(16, { position.x + 16, position.y }, 0xffa0a0a0u,
+          str::format(zoneNames[i], " ", std::fixed, std::setprecision(2), zoneUs, " us"));
         position.y += 16;
+        shownZones += 1u;
       }
 
-      position.y += 8;
+      if (shownZones)
+        position.y += 4;
     }
 
     return position;

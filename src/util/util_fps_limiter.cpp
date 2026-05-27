@@ -42,13 +42,18 @@ namespace dxvk {
 
 
   void FpsLimiter::delay() {
+    delayWithStats();
+  }
+
+
+  FpsLimiter::SleepDuration FpsLimiter::delayWithStats() {
     std::unique_lock<dxvk::mutex> lock(m_mutex);
     auto interval = m_targetInterval;
     auto latency = m_maxLatency;
 
     if (interval == TimerDuration::zero()) {
       m_nextFrame = TimePoint();
-      return;
+      return SleepDuration::zero();
     }
 
     auto t1 = dxvk::high_resolution_clock::now();
@@ -57,19 +62,26 @@ namespace dxvk {
       interval = -interval;
 
       if (!testRefreshHeuristic(interval, t1, latency))
-        return;
+        return SleepDuration::zero();
     }
 
     // Subsequent code must not access any class members
     // that can be written by setTargetFrameRate
     lock.unlock();
 
+    SleepDuration sleepDuration = SleepDuration::zero();
+
     if (t1 < m_nextFrame)
+    {
+      sleepDuration = std::chrono::duration_cast<SleepDuration>(m_nextFrame - t1);
       Sleep::sleepUntil(t1, m_nextFrame);
+    }
 
     m_nextFrame = (t1 < m_nextFrame + interval)
       ? m_nextFrame + interval
       : t1 + interval;
+
+    return sleepDuration;
   }
 
 

@@ -290,7 +290,16 @@ namespace dxvk {
       if (canSignal)
         m_signal->signal(frameId);
     } else {
-      m_fpsLimiter.delay();
+      auto limiterSleep = m_fpsLimiter.delayWithStats();
+
+      if (limiterSleep.count()) {
+        if (m_frameGovernor)
+          m_frameGovernor->notifyLimiterSleep(frameId, limiterSleep);
+
+        m_device->addStatCtr(DxvkStatCounter::GovernorLimiterSleepUs,
+          std::chrono::duration_cast<std::chrono::microseconds>(limiterSleep).count());
+      }
+
       m_signal->signal(frameId);
 
       if (tracker)
@@ -478,6 +487,11 @@ namespace dxvk {
 
   void Presenter::setFrameRateLimit(double frameRate, uint32_t maxLatency) {
     m_fpsLimiter.setTargetFrameRate(frameRate, maxLatency);
+  }
+
+
+  void Presenter::setFrameGovernor(FrameGovernor* governor) {
+    m_frameGovernor = governor;
   }
 
 
@@ -1328,7 +1342,15 @@ namespace dxvk {
       // Apply FPS limiter here to align it as closely with scanout as we can,
       // and delay signaling the frame latency event to emulate behaviour of a
       // low refresh rate display as closely as we can.
-      m_fpsLimiter.delay();
+      auto limiterSleep = m_fpsLimiter.delayWithStats();
+
+      if (limiterSleep.count()) {
+        if (m_frameGovernor)
+          m_frameGovernor->notifyLimiterSleep(frame.frameId, limiterSleep);
+
+        m_device->addStatCtr(DxvkStatCounter::GovernorLimiterSleepUs,
+          std::chrono::duration_cast<std::chrono::microseconds>(limiterSleep).count());
+      }
 
       // Wake up any thread that may be waiting for the queue to become empty
       bool canSignal = false;

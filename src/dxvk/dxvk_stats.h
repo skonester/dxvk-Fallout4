@@ -13,6 +13,7 @@ namespace dxvk {
   enum class DxvkStatCounter : uint32_t {
     CmdDrawCalls,             ///< Number of draw calls
     CmdDrawsMerged,           ///< Number of unique draws, minus draw calls
+    CmdDrawCallsSkipped,      ///< Number of experimental skipped draw calls
     CmdDispatchCalls,         ///< Number of compute calls
     CmdRenderPassCount,       ///< Number of render passes
     CmdBarrierCount,          ///< Number of pipeline barriers
@@ -36,6 +37,8 @@ namespace dxvk {
     DescriptorHeapSize,       ///< Amount of descriptor memory allocated
     DescriptorHeapUsed,       ///< Amount of descriptor memory used
     DescriptorCopyBusyTicks,  ///< Descriptor copy busy time in microseconds
+    GovernorLimiterSleepUs,   ///< Time spent in FPS limiter sleep
+    GovernorEarlySleepUs,     ///< Time spent in early frame governor sleep
 
     NumCounters               ///< Number of counters available
   };

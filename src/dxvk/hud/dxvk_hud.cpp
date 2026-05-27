@@ -29,8 +29,8 @@ namespace dxvk::hud {
     addItem<HudCompilerActivityItem>("compiler", -1, device);
 #if DXVK_SIMD_PERF
     addItem<HudSimdPerfItem>("simd", -1, device, &m_renderer,
-      m_hudItems.getOption<float>("simd_graph", 1.0f) != 0.0f,
-      m_hudItems.getOption<float>("simd_breakdown", 1.0f) != 0.0f);
+      m_hudItems.getOption<float>("simd_graph", 0.0f) != 0.0f,
+      m_hudItems.getOption<float>("simd_breakdown", 0.0f) != 0.0f);
 #endif
   }
 

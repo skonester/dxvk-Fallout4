@@ -68,6 +68,11 @@ d3d11_shaders = files([
 
 d3d11_ld_args      = []
 d3d11_link_depends = []
+d3d11_cpp_args     = []
+
+if get_option('dxvk_experimental_simd')
+  d3d11_cpp_args += dxvk_experimental_simd_args
+endif
 
 if platform == 'windows'
   d3d11_dxgi_deps = [ lib_gdi32, lib_dxgi ]
@@ -83,6 +88,7 @@ d3d11_dll = shared_library(dxvk_name_prefix+'d3d11', dxgi_common_src + d3d11_src
   include_directories : dxvk_include_path,
   install             : true,
   vs_module_defs      : 'd3d11'+def_spec_ext,
+  cpp_args            : d3d11_cpp_args,
   link_args           : d3d11_ld_args,
   link_depends        : [ d3d11_link_depends ],
   kwargs              : dxvk_so_version,

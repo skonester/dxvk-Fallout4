@@ -12,6 +12,7 @@
 #include "../d3d10/d3d10_multithread.h"
 
 #include "../util/util_flush.h"
+#include "../util/util_frame_governor.h"
 
 #include "d3d11_annotation.h"
 #include "d3d11_buffer.h"
@@ -88,6 +89,10 @@ namespace dxvk {
             DxvkCsChunkFlags        CsFlags);
 
     ~D3D11CommonContext();
+
+    void EndDrawGovernorFrame(
+            FrameGovernor*                    Governor,
+            uint64_t                          FrameId);
 
     HRESULT STDMETHODCALLTYPE QueryInterface(
             REFIID  riid,
@@ -801,6 +806,10 @@ namespace dxvk {
     DxvkCsDataBlock*            m_csData = nullptr;
 
     uint64_t                    m_estimatedCost = 0u;
+    uint32_t                    m_drawPlateauBudget = 0u;
+    uint32_t                    m_drawPlateauCount = 0u;
+    uint32_t                    m_drawPlateauSkipped = 0u;
+    FrameGovernor*              m_frameGovernor = nullptr;
 
     DxvkLocalAllocationCache    m_allocationCache;
 
@@ -1039,7 +1048,14 @@ namespace dxvk {
 
     void ResetDirtyTracking();
 
+    void ResetDrawPlateauGovernor();
+
     void ResetStagingBuffer();
+
+    bool ShouldSkipDrawForPlateau(
+            uint32_t                          VertexCount);
+
+    bool IsDrawGovernorEligible() const;
 
     template<D3D11ShaderType ShaderStage, typename T>
     void ResolveSrvHazards(

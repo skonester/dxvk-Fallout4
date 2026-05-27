@@ -18,6 +18,8 @@ namespace dxvk {
 
   public:
 
+    using SleepDuration = std::chrono::nanoseconds;
+
     /**
      * \brief Creates frame rate limiter
      */
@@ -39,6 +41,15 @@ namespace dxvk {
      * shorter than the target interval.
      */
     void delay();
+
+    /**
+     * \brief Stalls calling thread and returns sleep duration
+     *
+     * Behaves like \ref delay, but reports how much time the limiter
+     * requested for the sleep. This is useful for frame pacing telemetry
+     * and for moving future pacing work earlier in the frame.
+     */
+    SleepDuration delayWithStats();
 
   private:
 

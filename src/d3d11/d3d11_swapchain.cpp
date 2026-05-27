@@ -4,6 +4,7 @@
 
 #include "../dxvk/dxvk_latency_builtin.h"
 
+#include "../util/util_sleep.h"
 #include "../util/util_win32_compat.h"
 
 namespace dxvk {
@@ -66,6 +67,22 @@ namespace dxvk {
     m_desc(*pDesc),
     m_device(pDevice->GetDXVKDevice()),
     m_frameLatencyCap(pDevice->GetOptions()->maxFrameLatency) {
+    auto options = pDevice->GetOptions();
+
+    FrameGovernorOptions governorOptions = { };
+    governorOptions.enabled = options->governorMode || options->drawPlateauMode;
+    governorOptions.pacing = options->governorPacing;
+    governorOptions.drawShedding = options->governorDrawShedding || options->drawPlateauMode;
+    governorOptions.drawBudget = options->governorDrawBudget;
+    governorOptions.targetPercent = options->governorMode
+      ? options->governorTargetPercent
+      : options->drawPlateauTargetPercent;
+    governorOptions.skipMaxVertices = options->governorMode
+      ? options->governorSkipMaxVertices
+      : options->drawPlateauSkipMaxVertices;
+    governorOptions.recoveryFrames = options->governorRecoveryFrames;
+    m_governor.setOptions(governorOptions);
+
     CreateFrameLatencyEvent();
     CreatePresenter();
     CreateBackBuffers();
@@ -79,6 +96,7 @@ namespace dxvk {
     if (this_thread::isInModuleDetachment())
       return;
 
+    m_presenter->setFrameGovernor(nullptr);
     m_presenter->destroyResources();
     
     DestroyFrameLatencyEvent();
@@ -351,6 +369,7 @@ namespace dxvk {
   void STDMETHODCALLTYPE D3D11SwapChain::SetTargetFrameRate(
           double                    FrameRate) {
     m_targetFrameRate = FrameRate;
+    m_governor.setTargetFrameRate(FrameRate);
 
     if (m_presenter != nullptr)
       m_presenter->setFrameRateLimit(m_targetFrameRate, GetActualFrameLatency());
@@ -375,6 +394,18 @@ namespace dxvk {
 
 
   HRESULT D3D11SwapChain::PresentImage(UINT SyncInterval) {
+    uint64_t nextFrameId = m_frameId + 1u;
+
+    m_governor.beginFrame(nextFrameId);
+
+    auto earlyDelay = m_governor.getEarlyPaceDelay(nextFrameId);
+
+    if (earlyDelay.count()) {
+      Sleep::sleepFor(dxvk::high_resolution_clock::now(), earlyDelay);
+      m_device->addStatCtr(DxvkStatCounter::GovernorEarlySleepUs,
+        std::chrono::duration_cast<std::chrono::microseconds>(earlyDelay).count());
+    }
+
     // Flush pending rendering commands before
     auto immediateContext = m_parent->GetContext();
     auto immediateContextLock = immediateContext->LockContext();
@@ -386,7 +417,7 @@ namespace dxvk {
 
     // Presentation semaphores and WSI swap chain image
     if (m_latency)
-      m_latency->notifyCpuPresentBegin(m_frameId + 1u);
+      m_latency->notifyCpuPresentBegin(nextFrameId);
 
     PresenterSync sync;
     Rc<DxvkImage> backBuffer;
@@ -403,6 +434,7 @@ namespace dxvk {
       return DXGI_STATUS_OCCLUDED;
 
     m_frameId += 1;
+    immediateContext->EndDrawGovernorFrame(&m_governor, m_frameId);
 
     // Present from CS thread so that we don't
     // have to synchronize with it first.
@@ -517,6 +549,7 @@ namespace dxvk {
 
     m_presenter->setSurfaceFormat(GetSurfaceFormat(m_desc.Format));
     m_presenter->setSurfaceExtent({ m_desc.Width, m_desc.Height });
+    m_presenter->setFrameGovernor(&m_governor);
     m_presenter->setFrameRateLimit(m_targetFrameRate, GetActualFrameLatency());
 
     m_latency = m_device->createLatencyTracker(m_presenter);

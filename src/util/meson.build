@@ -1,5 +1,6 @@
 util_src = files([
   'util_env.cpp',
+  'util_frame_governor.cpp',
   'util_string.cpp',
   'util_fps_limiter.cpp',
   'util_file.cpp',

@@ -396,6 +396,7 @@ namespace dxvk::hud {
    */
   class HudDrawCallStatsItem : public HudItem {
     constexpr static int64_t UpdateInterval = 500'000;
+    constexpr static uint32_t PlateauWindow = 31;
   public:
 
     HudDrawCallStatsItem(const Rc<DxvkDevice>& device);
@@ -419,9 +420,20 @@ namespace dxvk::hud {
 
     uint64_t          m_drawCallCount   = 0;
     uint64_t          m_drawCount       = 0;
+    uint64_t          m_drawSkipped     = 0;
     uint64_t          m_dispatchCount   = 0;
     uint64_t          m_renderPassCount = 0;
     uint64_t          m_barrierCount    = 0;
+    uint64_t          m_drawMedian      = 0;
+    uint64_t          m_drawMean        = 0;
+    uint64_t          m_drawMode        = 0;
+    uint64_t          m_drawSpikePct    = 100;
+    uint64_t          m_governorLimiterSleep = 0;
+    uint64_t          m_governorEarlySleep = 0;
+
+    std::array<uint64_t, PlateauWindow> m_drawWindow = {};
+    uint32_t          m_drawWindowIndex = 0;
+    uint32_t          m_drawWindowCount = 0;
 
     dxvk::high_resolution_clock::time_point m_lastUpdate
       = dxvk::high_resolution_clock::now();
@@ -785,6 +797,8 @@ namespace dxvk::hud {
   class HudSimdPerfItem : public HudItem {
     static constexpr uint32_t NumDataPoints = 300;
     static constexpr uint64_t UpdateInterval = 500'000;
+    static constexpr int16_t GraphWidth = 180;
+    static constexpr int16_t GraphHeight = 44;
   public:
 
     HudSimdPerfItem(
@@ -819,7 +833,7 @@ namespace dxvk::hud {
     bool                      m_showGraph;
     bool                      m_showBreakdown;
 
-    // CPU-side ring buffer of per-frame total SIMD µs
+    // CPU-side ring buffer of per-frame total SIMD us
     std::array<float, NumDataPoints> m_dataPoints = {};
     uint32_t m_dataIndex = 0;
 
@@ -827,9 +841,12 @@ namespace dxvk::hud {
     std::array<uint64_t, uint32_t(SimdPerfZone::Count)> m_zoneAccum = {};
     std::array<uint64_t, uint32_t(SimdPerfZone::Count)> m_zoneDisplay = {};
     uint32_t m_frameCount = 0;
+    dxvk::high_resolution_clock::time_point m_lastUpdate
+      = dxvk::high_resolution_clock::now();
 
     // RDTSC calibration
     double m_ticksToMicroseconds = 0.0;
+    std::string m_totalString = "0.00 us";
 
     // GPU resources for graph
     Rc<DxvkBuffer> m_dataBuffer;

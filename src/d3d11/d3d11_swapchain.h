@@ -8,6 +8,7 @@
 #include "../dxvk/dxvk_swapchain_blitter.h"
 
 #include "../util/sync/sync_signal.h"
+#include "../util/util_frame_governor.h"
 
 namespace dxvk {
   
@@ -109,6 +110,7 @@ namespace dxvk {
 
     Rc<DxvkSwapchainBlitter>  m_blitter;
     Rc<DxvkLatencyTracker>    m_latency;
+    FrameGovernor             m_governor;
 
     small_vector<Com<D3D11Texture2D, false>, 4> m_backBuffers;
 

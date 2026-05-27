@@ -98,6 +98,24 @@ namespace dxvk {
     /// can negatively affect performance.
     bool reproducibleCommandStream = false;
 
+    /// Experimental draw-call plateau governor. When enabled, D3D11 draws
+    /// above the configured frame budget may skip tiny tail draws.
+    bool drawPlateauMode = false;
+    uint32_t drawPlateauBaseline = 0;
+    uint32_t drawPlateauTargetPercent = 130;
+    uint32_t drawPlateauSkipMaxVertices = 0;
+
+    /// Frame-aware governor. Pacing moves limiter wait earlier in the
+    /// frame; draw shedding remains opt-in because it can affect visuals.
+    bool governorMode = false;
+    bool governorPacing = true;
+    bool governorDrawShedding = false;
+    uint32_t governorDrawBudget = 0;
+    uint32_t governorMaxSkipsPerFrame = 500;
+    uint32_t governorTargetPercent = 110;
+    uint32_t governorSkipMaxVertices = 64;
+    uint32_t governorRecoveryFrames = 30;
+
     /// Whether to force a staging buffer for mapped images.
     /// Some games are broken and ignore row pitch.
     bool disableDirectImageMapping = false;

@@ -9,6 +9,7 @@
 
 #include "../util/util_error.h"
 #include "../util/util_fps_limiter.h"
+#include "../util/util_frame_governor.h"
 #include "../util/util_math.h"
 #include "../util/util_string.h"
 
@@ -160,6 +161,14 @@ namespace dxvk {
      *    to 0 in order to disable the limiter.
      */
     void setFrameRateLimit(double frameRate, uint32_t maxLatency);
+
+    /**
+     * \brief Sets optional frame governor
+     *
+     * The governor receives limiter sleep feedback so front-ends can
+     * move part of presentation pacing to the next frame boundary.
+     */
+    void setFrameGovernor(FrameGovernor* governor);
 
     /**
      * \brief Sets preferred color space and format
@@ -323,6 +332,8 @@ namespace dxvk {
 
     alignas(CACHE_LINE_SIZE)
     FpsLimiter                  m_fpsLimiter;
+
+    FrameGovernor*              m_frameGovernor = nullptr;
 
     bool                        m_hasGamescopeFenceSignalBug = false;
 

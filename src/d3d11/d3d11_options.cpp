@@ -2,6 +2,8 @@
 
 #include "d3d11_options.h"
 
+#include <algorithm>
+
 namespace dxvk {
   
   static bool IsAPITracingDXGI() {
@@ -28,7 +30,26 @@ namespace dxvk {
     this->maxFrameLatency       = config.getOption<int32_t>("dxgi.maxFrameLatency", 0);
     this->exposeDriverCommandLists = config.getOption<bool>("d3d11.exposeDriverCommandLists", true);
     this->reproducibleCommandStream = config.getOption<bool>("d3d11.reproducibleCommandStream", false);
+    this->drawPlateauMode = config.getOption<bool>("d3d11.drawPlateauMode", false);
+    this->drawPlateauBaseline = uint32_t(std::max(config.getOption<int32_t>("d3d11.drawPlateauBaseline", 0), 0));
+    this->drawPlateauTargetPercent = uint32_t(std::max(config.getOption<int32_t>("d3d11.drawPlateauTargetPercent", 130), 0));
+    this->drawPlateauSkipMaxVertices = uint32_t(std::max(config.getOption<int32_t>("d3d11.drawPlateauSkipMaxVertices", 0), 0));
+    this->governorMode = config.getOption<bool>("d3d11.governorMode", false);
+    this->governorPacing = config.getOption<bool>("d3d11.governorPacing", true);
+    this->governorDrawShedding = config.getOption<bool>("d3d11.governorDrawShedding", false);
+    this->governorDrawBudget = uint32_t(std::max(config.getOption<int32_t>("d3d11.governorDrawBudget", 0), 0));
+    this->governorMaxSkipsPerFrame = uint32_t(std::max(config.getOption<int32_t>("d3d11.governorMaxSkipsPerFrame", 500), 0));
+    this->governorTargetPercent = uint32_t(std::max(config.getOption<int32_t>("d3d11.governorTargetPercent", 110), 100));
+    this->governorSkipMaxVertices = uint32_t(std::max(config.getOption<int32_t>("d3d11.governorSkipMaxVertices", 64), 0));
+    this->governorRecoveryFrames = uint32_t(std::max(config.getOption<int32_t>("d3d11.governorRecoveryFrames", 30), 0));
     this->disableDirectImageMapping = config.getOption<bool>("d3d11.disableDirectImageMapping", false);
+
+    this->governorDrawBudget = uint32_t(std::max(config.getOption<int32_t>("d3d11.govenorDrawBudget", int32_t(this->governorDrawBudget)), 0));
+    this->governorDrawBudget = uint32_t(std::max(config.getOption<int32_t>("d3d11,govenorDrawBudget", int32_t(this->governorDrawBudget)), 0));
+    this->governorDrawBudget = uint32_t(std::max(config.getOption<int32_t>("d3d11,governorDrawBudget", int32_t(this->governorDrawBudget)), 0));
+    this->governorMaxSkipsPerFrame = uint32_t(std::max(config.getOption<int32_t>("d3d11.govenorMaxSkipsPerFrame", int32_t(this->governorMaxSkipsPerFrame)), 0));
+
+    this->drawPlateauTargetPercent = std::max(this->drawPlateauTargetPercent, 100u);
 
     // Clamp LOD bias so that people don't abuse this in unintended ways
     this->samplerLodBias = dxvk::fclamp(this->samplerLodBias, -2.0f, 1.0f);

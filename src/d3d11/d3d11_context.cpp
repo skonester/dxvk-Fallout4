@@ -1,10 +1,145 @@
 #include <algorithm>
 
+#if defined(__AVX2__) && defined(DXVK_ARCH_X86_64)
+#include <immintrin.h>
+#endif
+
 #include "d3d11_context.h"
 #include "d3d11_context_def.h"
 #include "d3d11_context_imm.h"
 
 namespace dxvk {
+
+#if defined(__AVX2__) && defined(DXVK_ARCH_X86_64)
+  template<typename StoredType, typename IncomingType, size_t BindingCount>
+  bool EqualBindingPointerSpanAvx2(
+    const std::array<Com<StoredType, false>, BindingCount>& current,
+          uint32_t                                          start,
+          uint32_t                                          count,
+          IncomingType* const*                              incoming) {
+    uint32_t i = 0u;
+
+    for (; i + 4u <= count; i += 4u) {
+      __m256i cur = _mm256_set_epi64x(
+        reinterpret_cast<intptr_t>(current[start + i + 3u].ptr()),
+        reinterpret_cast<intptr_t>(current[start + i + 2u].ptr()),
+        reinterpret_cast<intptr_t>(current[start + i + 1u].ptr()),
+        reinterpret_cast<intptr_t>(current[start + i + 0u].ptr()));
+
+      __m256i next = _mm256_set_epi64x(
+        reinterpret_cast<intptr_t>(static_cast<StoredType*>(incoming[i + 3u])),
+        reinterpret_cast<intptr_t>(static_cast<StoredType*>(incoming[i + 2u])),
+        reinterpret_cast<intptr_t>(static_cast<StoredType*>(incoming[i + 1u])),
+        reinterpret_cast<intptr_t>(static_cast<StoredType*>(incoming[i + 0u])));
+
+      if (uint32_t(_mm256_movemask_epi8(_mm256_cmpeq_epi64(cur, next))) != 0xffffffffu)
+        return false;
+    }
+
+    for (; i < count; i++) {
+      if (current[start + i].ptr() != static_cast<StoredType*>(incoming[i]))
+        return false;
+    }
+
+    return true;
+  }
+
+  template<size_t BindingCount>
+  bool EqualVertexBufferSpanAvx2(
+    const std::array<D3D11VertexBufferBinding, BindingCount>& current,
+          uint32_t                                            start,
+          uint32_t                                            count,
+          ID3D11Buffer* const*                                buffers,
+    const UINT*                                               strides,
+    const UINT*                                               offsets) {
+    uint32_t i = 0u;
+
+    for (; i + 4u <= count; i += 4u) {
+      __m256i cur = _mm256_set_epi64x(
+        reinterpret_cast<intptr_t>(current[start + i + 3u].buffer.ptr()),
+        reinterpret_cast<intptr_t>(current[start + i + 2u].buffer.ptr()),
+        reinterpret_cast<intptr_t>(current[start + i + 1u].buffer.ptr()),
+        reinterpret_cast<intptr_t>(current[start + i + 0u].buffer.ptr()));
+
+      __m256i next = _mm256_set_epi64x(
+        reinterpret_cast<intptr_t>(static_cast<D3D11Buffer*>(buffers[i + 3u])),
+        reinterpret_cast<intptr_t>(static_cast<D3D11Buffer*>(buffers[i + 2u])),
+        reinterpret_cast<intptr_t>(static_cast<D3D11Buffer*>(buffers[i + 1u])),
+        reinterpret_cast<intptr_t>(static_cast<D3D11Buffer*>(buffers[i + 0u])));
+
+      if (uint32_t(_mm256_movemask_epi8(_mm256_cmpeq_epi64(cur, next))) != 0xffffffffu)
+        return false;
+
+      if (current[start + i + 0u].offset != offsets[i + 0u] || current[start + i + 0u].stride != strides[i + 0u]
+       || current[start + i + 1u].offset != offsets[i + 1u] || current[start + i + 1u].stride != strides[i + 1u]
+       || current[start + i + 2u].offset != offsets[i + 2u] || current[start + i + 2u].stride != strides[i + 2u]
+       || current[start + i + 3u].offset != offsets[i + 3u] || current[start + i + 3u].stride != strides[i + 3u])
+        return false;
+    }
+
+    for (; i < count; i++) {
+      if (current[start + i].buffer.ptr() != static_cast<D3D11Buffer*>(buffers[i])
+       || current[start + i].offset != offsets[i]
+       || current[start + i].stride != strides[i])
+        return false;
+    }
+
+    return true;
+  }
+
+  template<size_t BindingCount>
+  bool EqualConstantBufferRangeSpanAvx2(
+    const std::array<D3D11ConstantBufferBinding, BindingCount>& current,
+          uint32_t                                              start,
+          uint32_t                                              count,
+          ID3D11Buffer* const*                                  buffers,
+    const UINT*                                                 firstConstants,
+    const UINT*                                                 numConstants) {
+    if (!firstConstants || !numConstants)
+      return false;
+
+    uint32_t i = 0u;
+
+    for (; i + 4u <= count; i += 4u) {
+      __m256i cur = _mm256_set_epi64x(
+        reinterpret_cast<intptr_t>(current[start + i + 3u].buffer.ptr()),
+        reinterpret_cast<intptr_t>(current[start + i + 2u].buffer.ptr()),
+        reinterpret_cast<intptr_t>(current[start + i + 1u].buffer.ptr()),
+        reinterpret_cast<intptr_t>(current[start + i + 0u].buffer.ptr()));
+
+      __m256i next = _mm256_set_epi64x(
+        reinterpret_cast<intptr_t>(static_cast<D3D11Buffer*>(buffers[i + 3u])),
+        reinterpret_cast<intptr_t>(static_cast<D3D11Buffer*>(buffers[i + 2u])),
+        reinterpret_cast<intptr_t>(static_cast<D3D11Buffer*>(buffers[i + 1u])),
+        reinterpret_cast<intptr_t>(static_cast<D3D11Buffer*>(buffers[i + 0u])));
+
+      if (uint32_t(_mm256_movemask_epi8(_mm256_cmpeq_epi64(cur, next))) != 0xffffffffu)
+        return false;
+
+      if (numConstants[i + 0u] > D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT
+       || numConstants[i + 1u] > D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT
+       || numConstants[i + 2u] > D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT
+       || numConstants[i + 3u] > D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT)
+        return false;
+
+      if (current[start + i + 0u].constantOffset != firstConstants[i + 0u] || current[start + i + 0u].constantCount != numConstants[i + 0u]
+       || current[start + i + 1u].constantOffset != firstConstants[i + 1u] || current[start + i + 1u].constantCount != numConstants[i + 1u]
+       || current[start + i + 2u].constantOffset != firstConstants[i + 2u] || current[start + i + 2u].constantCount != numConstants[i + 2u]
+       || current[start + i + 3u].constantOffset != firstConstants[i + 3u] || current[start + i + 3u].constantCount != numConstants[i + 3u])
+        return false;
+    }
+
+    for (; i < count; i++) {
+      if (numConstants[i] > D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT
+       || current[start + i].buffer.ptr() != static_cast<D3D11Buffer*>(buffers[i])
+       || current[start + i].constantOffset != firstConstants[i]
+       || current[start + i].constantCount != numConstants[i])
+        return false;
+    }
+
+    return true;
+  }
+#endif
 
   template<typename ContextType>
   D3D11CommonContext<ContextType>::D3D11CommonContext(
@@ -55,12 +190,28 @@ namespace dxvk {
 
     if (tessFactorOption > 0 && tessFactorOption < int32_t(m_maxTessFactor))
       m_maxTessFactor = tessFactorOption;
+
+    const auto* options = m_parent->GetOptions();
+    if (options->drawPlateauMode && options->drawPlateauBaseline && options->drawPlateauSkipMaxVertices)
+      m_drawPlateauBudget = (options->drawPlateauBaseline * options->drawPlateauTargetPercent + 99u) / 100u;
   }
 
 
   template<typename ContextType>
   D3D11CommonContext<ContextType>::~D3D11CommonContext() {
 
+  }
+
+
+  template<typename ContextType>
+  void D3D11CommonContext<ContextType>::EndDrawGovernorFrame(
+          FrameGovernor*                    Governor,
+          uint64_t                          FrameId) {
+    if (Governor)
+      Governor->endFrame(FrameId, m_drawPlateauCount, m_drawPlateauSkipped);
+
+    m_frameGovernor = Governor;
+    ResetDrawPlateauGovernor();
   }
 
 
@@ -1013,6 +1164,9 @@ namespace dxvk {
     if (unlikely(!VertexCount))
       return;
 
+    if (ShouldSkipDrawForPlateau(VertexCount))
+      return;
+
     VkDrawIndirectCommand draw = { };
     draw.vertexCount   = VertexCount;
     draw.instanceCount = 1u;
@@ -1031,6 +1185,9 @@ namespace dxvk {
     D3D10DeviceLock lock = LockContext();
 
     if (unlikely(!IndexCount))
+      return;
+
+    if (ShouldSkipDrawForPlateau(IndexCount))
       return;
 
     VkDrawIndexedIndirectCommand draw = { };
@@ -1055,6 +1212,10 @@ namespace dxvk {
     if (unlikely(!VertexCountPerInstance || !InstanceCount))
       return;
 
+    if (ShouldSkipDrawForPlateau(uint32_t(std::min<uint64_t>(
+          uint64_t(VertexCountPerInstance) * uint64_t(InstanceCount), UINT32_MAX))))
+      return;
+
     VkDrawIndirectCommand draw = { };
     draw.vertexCount   = VertexCountPerInstance;
     draw.instanceCount = InstanceCount;
@@ -1075,6 +1236,10 @@ namespace dxvk {
     D3D10DeviceLock lock = LockContext();
 
     if (unlikely(!IndexCountPerInstance || !InstanceCount))
+      return;
+
+    if (ShouldSkipDrawForPlateau(uint32_t(std::min<uint64_t>(
+          uint64_t(IndexCountPerInstance) * uint64_t(InstanceCount), UINT32_MAX))))
       return;
 
     VkDrawIndexedIndirectCommand draw = { };
@@ -1252,6 +1417,15 @@ namespace dxvk {
     const UINT*                             pStrides,
     const UINT*                             pOffsets) {
     D3D10DeviceLock lock = LockContext();
+
+#if defined(__AVX2__) && defined(DXVK_ARCH_X86_64)
+    if (NumBuffers >= 4u && EqualVertexBufferSpanAvx2(
+          m_state.ia.vertexBuffers, StartSlot, NumBuffers, ppVertexBuffers, pStrides, pOffsets)) {
+      m_state.ia.maxVbCount = std::clamp(StartSlot + NumBuffers,
+        m_state.ia.maxVbCount, uint32_t(m_state.ia.vertexBuffers.size()));
+      return;
+    }
+#endif
 
     for (uint32_t i = 0; i < NumBuffers; i++) {
       auto newBuffer = static_cast<D3D11Buffer*>(ppVertexBuffers[i]);
@@ -4964,6 +5138,89 @@ namespace dxvk {
 
 
   template<typename ContextType>
+  void D3D11CommonContext<ContextType>::ResetDrawPlateauGovernor() {
+    m_drawPlateauCount = 0u;
+    m_drawPlateauSkipped = 0u;
+  }
+
+
+  template<typename ContextType>
+  bool D3D11CommonContext<ContextType>::ShouldSkipDrawForPlateau(
+          uint32_t                          VertexCount) {
+    m_drawPlateauCount += 1u;
+
+    const auto* options = m_parent->GetOptions();
+
+    if (m_frameGovernor) {
+      if (!IsDrawGovernorEligible())
+        return false;
+
+      if (options->governorMaxSkipsPerFrame && m_drawPlateauSkipped >= options->governorMaxSkipsPerFrame)
+        return false;
+
+      bool skip = m_frameGovernor->shouldShedDraw(m_drawPlateauCount, VertexCount);
+
+      if (skip) {
+        m_drawPlateauSkipped += 1u;
+        m_device->addStatCtr(DxvkStatCounter::CmdDrawCallsSkipped, 1u);
+      }
+
+      return skip;
+    }
+
+    if (!m_drawPlateauBudget)
+      return false;
+
+    bool skip = m_drawPlateauCount > m_drawPlateauBudget
+             && VertexCount <= options->drawPlateauSkipMaxVertices;
+
+    if (skip) {
+      m_drawPlateauSkipped += 1u;
+      m_device->addStatCtr(DxvkStatCounter::CmdDrawCallsSkipped, 1u);
+    }
+
+    return skip;
+  }
+
+
+  template<typename ContextType>
+  bool D3D11CommonContext<ContextType>::IsDrawGovernorEligible() const {
+    D3D11_PRIMITIVE_TOPOLOGY topology = m_state.ia.primitiveTopology;
+
+    if (topology != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST
+     && topology != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP)
+      return false;
+
+    if (m_state.om.dsv == nullptr)
+      return false;
+
+    if (m_state.om.dsState != nullptr) {
+      const auto& desc = m_state.om.dsState->Desc();
+
+      if (!desc.DepthEnable || desc.DepthWriteMask == D3D11_DEPTH_WRITE_MASK_ZERO)
+        return false;
+
+      if (desc.StencilEnable)
+        return false;
+    }
+
+    if (m_state.om.cbState != nullptr) {
+      const auto& desc = m_state.om.cbState->Desc();
+
+      if (desc.AlphaToCoverageEnable)
+        return false;
+
+      for (uint32_t i = 0; i < m_state.om.maxRtv; i++) {
+        if (desc.RenderTarget[i].BlendEnable || desc.RenderTarget[i].LogicOpEnable)
+          return false;
+      }
+    }
+
+    return true;
+  }
+
+
+  template<typename ContextType>
   void D3D11CommonContext<ContextType>::ResetStagingBuffer() {
     m_staging.reset();
   }
@@ -5211,6 +5468,15 @@ namespace dxvk {
     const UINT*                             pNumConstants) {
     auto& bindings = m_state.cbv[ShaderStage];
 
+#if defined(__AVX2__) && defined(DXVK_ARCH_X86_64)
+    if (NumBuffers >= 4u && EqualConstantBufferRangeSpanAvx2(
+          bindings.buffers, StartSlot, NumBuffers, ppConstantBuffers, pFirstConstant, pNumConstants)) {
+      bindings.maxCount = std::clamp(StartSlot + NumBuffers,
+        bindings.maxCount, uint32_t(bindings.buffers.size()));
+      return;
+    }
+#endif
+
     for (uint32_t i = 0; i < NumBuffers; i++) {
       auto newBuffer = static_cast<D3D11Buffer*>(ppConstantBuffers[i]);
 
@@ -5275,6 +5541,14 @@ namespace dxvk {
           ID3D11ShaderResourceView* const*  ppResources) {
     auto& bindings = m_state.srv[ShaderStage];
 
+#if defined(__AVX2__) && defined(DXVK_ARCH_X86_64)
+    if (NumResources >= 4u && EqualBindingPointerSpanAvx2(bindings.views, StartSlot, NumResources, ppResources)) {
+      bindings.maxCount = std::clamp(StartSlot + NumResources,
+        bindings.maxCount, uint32_t(bindings.views.size()));
+      return;
+    }
+#endif
+
     for (uint32_t i = 0; i < NumResources; i++) {
       auto resView = static_cast<D3D11ShaderResourceView*>(ppResources[i]);
 
@@ -5310,6 +5584,14 @@ namespace dxvk {
           UINT                              NumSamplers,
           ID3D11SamplerState* const*        ppSamplers) {
     auto& bindings = m_state.samplers[ShaderStage];
+
+#if defined(__AVX2__) && defined(DXVK_ARCH_X86_64)
+    if (NumSamplers >= 4u && EqualBindingPointerSpanAvx2(bindings.samplers, StartSlot, NumSamplers, ppSamplers)) {
+      bindings.maxCount = std::clamp(StartSlot + NumSamplers,
+        bindings.maxCount, uint32_t(bindings.samplers.size()));
+      return;
+    }
+#endif
 
     for (uint32_t i = 0; i < NumSamplers; i++) {
       auto sampler = static_cast<D3D11SamplerState*>(ppSamplers[i]);
