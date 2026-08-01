@@ -219,6 +219,40 @@ namespace dxvk {
     if (m_mapMode == D3D11_COMMON_TEXTURE_MAP_MODE_STAGING)
       return;
 
+    // FO4FSRUpscaler: imageInfo.usage/format/tiling are only fully finalized by this
+    // point, so this is the earliest place a support check for the preferred
+    // D3D-compatible sharing type (set above, before those flags were known) can
+    // actually be trusted. Not every format/usage combination the game uses supports
+    // it on every driver -- fall back to the original opaque Vulkan handle type
+    // (still fine for pure Vulkan-side sharing, just not native-D3D12-importable)
+    // rather than failing to create the image at all.
+    if (imageInfo.shared && imageInfo.sharing.mode != DxvkSharedHandleMode::None
+     && (imageInfo.sharing.type == VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT
+      || imageInfo.sharing.type == VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_KMT_BIT)) {
+      DxvkFormatQuery formatQuery = { };
+      formatQuery.format     = imageInfo.format;
+      formatQuery.type       = imageInfo.type;
+      formatQuery.tiling     = imageInfo.tiling;
+      formatQuery.usage      = imageInfo.usage;
+      formatQuery.flags      = imageInfo.flags;
+      formatQuery.handleType = imageInfo.sharing.type;
+
+      auto limits = pDevice->GetDXVKDevice()->getFormatLimits(formatQuery);
+
+      VkExternalMemoryFeatureFlagBits requiredFeature = imageInfo.sharing.mode == DxvkSharedHandleMode::Export
+        ? VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT
+        : VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT;
+
+      if (!limits || !(limits->externalFeatures & requiredFeature)) {
+        Logger::warn(str::format("D3D11: D3D-compatible sharing not supported for this image (format ",
+          imageInfo.format, ", usage ", std::hex, imageInfo.usage, std::dec,
+          "), falling back to opaque Vulkan handle type"));
+        imageInfo.sharing.type = imageInfo.sharing.type == VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT
+          ? VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT
+          : VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT;
+      }
+    }
+
     // We must keep LINEAR images in GENERAL layout, but we
     // can choose a better layout for the image based on how
     // it is going to be used by the game.
