@@ -56,6 +56,43 @@ namespace dxvk {
     m_initializer = new D3D11Initializer(this);
     m_context     = new D3D11ImmediateContext(this, m_dxvkDevice);
     m_d3d10Device = new D3D10Device(this, m_context.ptr());
+
+    // FO4FSRUpscaler diagnostic: check whether the Vulkan driver can export shared
+    // memory using D3D-interop-compatible handle types (as opposed to the
+    // Vulkan-opaque ones DXVK normally requests), which a native D3D12 device could
+    // actually import via ID3D12Device::OpenSharedHandle. Not used by any DXVK
+    // codepath yet -- purely informational, logged once at device creation.
+    if (m_dxvkDevice->features().khrExternalMemoryWin32) {
+      constexpr VkExternalMemoryFeatureFlags featureMask
+        = VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT
+        | VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT;
+
+      DxvkFormatQuery formatQuery = { };
+      formatQuery.format = VK_FORMAT_R8G8B8A8_UNORM;
+      formatQuery.type   = VK_IMAGE_TYPE_2D;
+      formatQuery.tiling = VK_IMAGE_TILING_OPTIMAL;
+      formatQuery.usage  = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+      formatQuery.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT;
+      auto ntLimits = m_dxvkDevice->getFormatLimits(formatQuery);
+
+      formatQuery.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_KMT_BIT;
+      auto kmtLimits = m_dxvkDevice->getFormatLimits(formatQuery);
+
+      formatQuery.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D12_RESOURCE_BIT;
+      auto d3d12Limits = m_dxvkDevice->getFormatLimits(formatQuery);
+
+      Logger::info(str::format(
+        "[FO4FSRUpscaler diag] D3D-compatible external memory support for R8G8B8A8_UNORM: ",
+        "D3D11_TEXTURE_BIT=", (ntLimits && (ntLimits->externalFeatures & featureMask)) ? "yes" : "no",
+        " (raw=", ntLimits ? ntLimits->externalFeatures : 0, ")",
+        ", D3D11_TEXTURE_KMT_BIT=", (kmtLimits && (kmtLimits->externalFeatures & featureMask)) ? "yes" : "no",
+        " (raw=", kmtLimits ? kmtLimits->externalFeatures : 0, ")",
+        ", D3D12_RESOURCE_BIT=", (d3d12Limits && (d3d12Limits->externalFeatures & featureMask)) ? "yes" : "no",
+        " (raw=", d3d12Limits ? d3d12Limits->externalFeatures : 0, ")"));
+    } else {
+      Logger::info("[FO4FSRUpscaler diag] khrExternalMemoryWin32 not supported by this Vulkan driver at all");
+    }
   }
   
   
