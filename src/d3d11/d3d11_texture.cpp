@@ -61,9 +61,13 @@ namespace dxvk {
 
       imageInfo.shared = true;
       imageInfo.sharing.mode = hSharedHandle == INVALID_HANDLE_VALUE ? DxvkSharedHandleMode::Export : DxvkSharedHandleMode::Import;
+      // FO4FSRUpscaler: request a D3D-interop-compatible handle type (confirmed
+      // exportable/importable on the target driver by a capability probe in
+      // D3D11Device's constructor) instead of Vulkan's opaque Win32 type, which a
+      // genuinely native D3D12 device's OpenSharedHandle cannot correctly interpret.
       imageInfo.sharing.type = (m_desc.MiscFlags & D3D11_RESOURCE_MISC_SHARED_NTHANDLE)
-        ? VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT
-        : VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT;
+        ? VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT
+        : VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_KMT_BIT;
       imageInfo.sharing.handle = hSharedHandle;
     }
 
