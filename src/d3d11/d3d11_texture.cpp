@@ -61,9 +61,13 @@ namespace dxvk {
 
       imageInfo.shared = true;
       imageInfo.sharing.mode = hSharedHandle == INVALID_HANDLE_VALUE ? DxvkSharedHandleMode::Export : DxvkSharedHandleMode::Import;
+      // FO4FSRUpscaler: request a D3D-interop-compatible handle type (confirmed
+      // exportable/importable on the target driver by a capability probe in
+      // D3D11Device's constructor) instead of Vulkan's opaque Win32 type, which a
+      // genuinely native D3D12 device's OpenSharedHandle cannot correctly interpret.
       imageInfo.sharing.type = (m_desc.MiscFlags & D3D11_RESOURCE_MISC_SHARED_NTHANDLE)
-        ? VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT
-        : VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT;
+        ? VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT
+        : VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_KMT_BIT;
       imageInfo.sharing.handle = hSharedHandle;
     }
 
@@ -214,6 +218,54 @@ namespace dxvk {
     // Skip image creation if possible
     if (m_mapMode == D3D11_COMMON_TEXTURE_MAP_MODE_STAGING)
       return;
+
+    // FO4FSRUpscaler: imageInfo.usage/format/tiling are only fully finalized by this
+    // point, so this is the earliest place a support check for the preferred
+    // D3D-compatible sharing type (set above, before those flags were known) can
+    // actually be trusted. Not every format/usage combination the game uses supports
+    // it on every driver.
+    if (imageInfo.shared && imageInfo.sharing.mode != DxvkSharedHandleMode::None
+     && (imageInfo.sharing.type == VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT
+      || imageInfo.sharing.type == VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_KMT_BIT)) {
+      DxvkFormatQuery formatQuery = { };
+      formatQuery.format     = imageInfo.format;
+      formatQuery.type       = imageInfo.type;
+      formatQuery.tiling     = imageInfo.tiling;
+      formatQuery.usage      = imageInfo.usage;
+      formatQuery.flags      = imageInfo.flags;
+      formatQuery.handleType = imageInfo.sharing.type;
+
+      auto limits = pDevice->GetDXVKDevice()->getFormatLimits(formatQuery);
+
+      VkExternalMemoryFeatureFlagBits requiredFeature = imageInfo.sharing.mode == DxvkSharedHandleMode::Export
+        ? VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT
+        : VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT;
+
+      if (!limits || !(limits->externalFeatures & requiredFeature)) {
+        // FO4FSRUpscaler's own shared resources set a private, otherwise-unused
+        // MiscFlags bit (see kFO4FSRRequireD3DCompatSharing below) to mean "this
+        // resource is going to be opened by a genuinely native D3D12 device -- an
+        // opaque Vulkan handle would silently succeed here but crash (or worse, a
+        // driver-internal fail-fast with no diagnosable crash dump at all) when that
+        // D3D12 device tries to import it." For those resources, fail cleanly
+        // instead of silently downgrading, so the caller's own HRESULT check can
+        // catch it and degrade gracefully. Anything else (not ours) keeps the
+        // original silent-fallback-to-opaque behavior, since opaque sharing is a
+        // valid, working choice for pure Vulkan-side consumers.
+        constexpr UINT kFO4FSRRequireD3DCompatSharing = 0x8;
+        if (m_desc.MiscFlags & kFO4FSRRequireD3DCompatSharing) {
+          throw DxvkError(str::format("D3D11: D3D-compatible sharing required but not supported for this image (format ",
+            imageInfo.format, ", usage ", std::hex, imageInfo.usage, std::dec, ")"));
+        }
+
+        Logger::warn(str::format("D3D11: D3D-compatible sharing not supported for this image (format ",
+          imageInfo.format, ", usage ", std::hex, imageInfo.usage, std::dec,
+          "), falling back to opaque Vulkan handle type"));
+        imageInfo.sharing.type = imageInfo.sharing.type == VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT
+          ? VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT
+          : VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_KMT_BIT;
+      }
+    }
 
     // We must keep LINEAR images in GENERAL layout, but we
     // can choose a better layout for the image based on how
