@@ -12,6 +12,7 @@ This repository is a continuation of the **Fallout 4 Vulkan** project hosted on 
 * [Performance Comparison (Windows vs. Linux / Proton)](#performance-comparison-windows-vs-linux--proton)
 * [Experimental SIMD / AVX2 Build](#experimental-simd--avx2-build)
 * [FO4FSRUpscaler Compatibility Patches](#fo4fsrupscaler-compatibility-patches)
+* [Frame Governor](#frame-governor)
 * [Optimized DXVK Configuration (`dxvk.conf`)](#optimized-dxvk-configuration-dxvkconf)
 
 ---
@@ -124,7 +125,7 @@ This section is for the "why is this weird handle-type code in here" curious. It
 
 Fallout 4 only speaks Direct3D 11. This DXVK build translates that D3D11 traffic into Vulkan under the hood so your GPU driver never sees D3D11 at all. That's the whole point of the project.
 
-[**FO4FSRUpscaler**](https://github.com/JizzyRivers/fo4-fsr-upscaler) is a separate, external plugin that bolts AMD's FidelityFX Super Resolution upscaling and frame generation onto the game. The catch: AMD's frame-generation tech on Windows is built against **Direct3D 12**, not 11. So the plugin has to stand up a real D3D12 device on the side, hand it the frame DXVK just rendered, let it do the upscaling/frame-gen magic, and get a finished frame back — all without ever copying the image (a copy every frame would eat the performance gain right back up).
+**FO4FSRUpscaler** (by [JizzyRivers](https://github.com/JizzyRivers), who contributed these patches — canonical repo link TBD) is a separate, external plugin that bolts AMD's FidelityFX Super Resolution upscaling and frame generation onto the game. The catch: AMD's frame-generation tech on Windows is built against **Direct3D 12**, not 11. So the plugin has to stand up a real D3D12 device on the side, hand it the frame DXVK just rendered, let it do the upscaling/frame-gen magic, and get a finished frame back — all without ever copying the image (a copy every frame would eat the performance gain right back up).
 
 Windows lets two different graphics APIs share the *same* piece of GPU memory this way through what's called a **shared handle** — think of it like a claim ticket for a locker. Whoever holds a valid ticket for that locker can open it, regardless of which API window they walked up to. The problem is the ticket has to be a format the other window actually recognizes.
 
@@ -144,6 +145,43 @@ These landed as a small, honest back-and-forth as real driver behavior got teste
 * If you don't use FO4FSRUpscaler, none of this code path ever activates — it's dormant plumbing.
 * If you do, this is the difference between the upscaler working, degrading gracefully, or hard-crashing depending on your specific GPU driver's support for D3D↔Vulkan handle interop.
 * This is compatibility glue, not a performance feature on its own — the actual FPS/latency wins come from FSR itself (a separate plugin) plus the [Experimental SIMD build](#experimental-simd--avx2-build) and [optimized `dxvk.conf`](#optimized-dxvk-configuration-dxvkconf) above.
+
+---
+
+## Frame Governor
+
+If you've ever watched your FPS counter and thought "that's fine on average, but why did it just chug for a split second," this is the feature aimed at that specific problem. It's not a magic FPS button — it's two separate, opt-in tricks for smoothing out the *lumpy* frames, which is honestly what your eyes/mouse-hand actually notice more than the average number.
+
+It lives entirely in `src/util/util_frame_governor.{h,cpp}` and hooks into the D3D11 immediate context and the presenter. Turn it on with `d3d11.governorMode = True` in `dxvk.conf` (already on in the shipped template). Everything below is off by default *within* the governor except pacing, so you're not signing up for anything drastic just by enabling it.
+
+### Trick #1: Pacing (the safe one, on by default)
+
+Any frame limiter (like `dxgi.maxFrameRate = 60`) works by rendering your frame, then sleeping for whatever time is left before it's allowed to present. Normally that entire sleep happens in one lump, right at the end of the frame, right before the game is about to start building the *next* one.
+
+Pacing (`d3d11.governorPacing`) steals a little of that same sleep and moves it to the *front* of the next frame instead — before the game has even started submitting draw calls for it. Net wait time is unchanged, so your FPS cap doesn't move, but the wait is spread out instead of dumped in one spot. Think of it like braking earlier and more gently for a red light instead of everything being fine until you slam the brakes right at the bumper. Same trip time, way less jolt. This is the part that's safe enough to leave on by default — it can't skip anything the game tries to draw, it just reshuffles when your CPU idles.
+
+### Trick #2: Draw Shedding (the opt-in one, because it touches what's on screen)
+
+This is the "actually skip some work" lever, and it's off by default (`d3d11.governorDrawShedding = False`) for good reason — it changes what gets drawn.
+
+Here's the idea: the governor watches how many "direct" draw calls a frame is submitting. If a frame blows past a budget — either one you set explicitly (`d3d11.governorDrawBudget`), or an automatic rolling one computed as *last frame's draw count × `governorTargetPercent` ÷ 100* (default 110%, i.e. "don't let this frame submit more than 10% over what a normal frame did") — the governor starts skipping some of the draws past that budget instead of forcing all of them through.
+
+It is **not** allowed to skip just anything, on purpose:
+
+* Only opaque geometry that writes depth. Nothing with alpha blending, alpha-to-coverage, or stencil testing is eligible — so it can't cause a UI element, particle, glass pane, or anything semi-transparent to flicker.
+* Only triangle-list/triangle-strip draws (the normal geometry topology, not points/lines/UI quads).
+* Only *small* draws — `d3d11.governorSkipMaxVertices` (default 64 vertices). That's rocks, bolts, small clutter props, leaf clusters — not the player character, not a building, not a big landscape chunk.
+* Capped hard at `d3d11.governorMaxSkipsPerFrame` (default 500) so it can never eat the whole scene even in a worst case.
+
+In other words, it's specifically hunting for cheap background set-dressing to thin out when a scene is genuinely overloaded, not making load-bearing decisions about what you actually see.
+
+### The safety valve: Recovery
+
+After the governor has been actively pacing or shedding, `d3d11.governorRecoveryFrames` (default 30 frames, about half a second at 60 FPS) forces it to back off completely and just observe for a bit before it's allowed to shed or pace again. This exists so a single rough patch — an alt-tab, a loading hitch, a cell transition — doesn't convince the governor the game is permanently overloaded and leave it aggressively skipping draws long after the actual spike has passed.
+
+### Should you turn on draw shedding?
+
+Pacing: yes, harmless, leave it on. Draw shedding: only if you're already CPU-bound in dense areas (downtown Boston is the classic case) and you've made your peace with "some far-away clutter might occasionally not render for a frame" in exchange for fewer frame-time spikes. If you never touch `d3d11.governorDrawShedding`, you're only ever getting the free, safe pacing behavior.
 
 ---
 
