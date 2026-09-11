@@ -4,6 +4,18 @@ This repository is a continuation of the **Fallout 4 Vulkan** project hosted on 
 
 ---
 
+## Table of Contents
+
+* [Build System & Requirements](#build-system--requirements)
+* [How to Build](#how-to-build)
+* [Manual Build Instructions](#manual-build-instructions)
+* [Performance Comparison (Windows vs. Linux / Proton)](#performance-comparison-windows-vs-linux--proton)
+* [Experimental SIMD / AVX2 Build](#experimental-simd--avx2-build)
+* [FO4FSRUpscaler Compatibility Patches](#fo4fsrupscaler-compatibility-patches)
+* [Optimized DXVK Configuration (`dxvk.conf`)](#optimized-dxvk-configuration-dxvkconf)
+
+---
+
 ## Build System & Requirements
 
 This project is configured to build natively on Windows using only Windows-based tools, avoiding standard cross-compilation toolchains such as Wine or MinGW.
@@ -101,6 +113,37 @@ The current experimental SIMD path targets small but frequently repeated operati
 These optimizations are not a replacement for engine fixes, precombines, shadow-distance tuning, or reducing script/mod load. They also do not reduce the number of draw calls the game submits. The goal is narrower: reduce some CPU cycles spent per repeated DXVK-side operation so frame pacing can improve when the game is already close to the CPU limit.
 
 Expected impact is workload-dependent. The best-case improvement is usually smoother minimum frame times in dense areas; the realistic worst case is no measurable change. Treat this as an experimental performance profile, not a guaranteed FPS multiplier.
+
+---
+
+## FO4FSRUpscaler Compatibility Patches
+
+This section is for the "why is this weird handle-type code in here" curious. It doesn't change performance for most players by itself — it exists to make a *separate* mod work at all without crashing your game.
+
+### The problem, in plain terms
+
+Fallout 4 only speaks Direct3D 11. This DXVK build translates that D3D11 traffic into Vulkan under the hood so your GPU driver never sees D3D11 at all. That's the whole point of the project.
+
+[**FO4FSRUpscaler**](https://github.com/JizzyRivers/fo4-fsr-upscaler) is a separate, external plugin that bolts AMD's FidelityFX Super Resolution upscaling and frame generation onto the game. The catch: AMD's frame-generation tech on Windows is built against **Direct3D 12**, not 11. So the plugin has to stand up a real D3D12 device on the side, hand it the frame DXVK just rendered, let it do the upscaling/frame-gen magic, and get a finished frame back — all without ever copying the image (a copy every frame would eat the performance gain right back up).
+
+Windows lets two different graphics APIs share the *same* piece of GPU memory this way through what's called a **shared handle** — think of it like a claim ticket for a locker. Whoever holds a valid ticket for that locker can open it, regardless of which API window they walked up to. The problem is the ticket has to be a format the other window actually recognizes.
+
+DXVK, being Vulkan on the inside, was always printing its claim tickets in a Vulkan-only "opaque" format. A D3D11 or another Vulkan consumer reads that ticket fine. A genuine D3D12 device, like the one FO4FSRUpscaler stands up, cannot — it either rejects the ticket outright or, worse, the driver chokes on it in a way that just insta-crashes the game with no crash log at all.
+
+### What the four patches actually did
+
+These landed as a small, honest back-and-forth as real driver behavior got tested — not a single clean design handed down from on high:
+
+1. **Diagnostic first** ([`1f13287e`](https://github.com/skonester/dxvk-Fallout4/commit/1f13287e2f5183f5310eef70ab64f4d4d22d5b8d)) — Before changing any real behavior, log whether the Vulkan driver can even *print* D3D-compatible claim tickets for a common texture format. Pure information, no behavior change — just confirming the idea was possible before touching shared-texture code.
+2. **Switch the ticket format** ([`fac19a68`](https://github.com/skonester/dxvk-Fallout4/commit/fac19a6868e407e7b5281a6494b5024dc9526744)) — The diagnostic came back positive on the tested AMD driver, so shared textures started requesting the D3D-compatible handle type instead of Vulkan's opaque one, so a real D3D12 device can actually open them.
+3. **Not every texture agreed** ([`d78239ba`](https://github.com/skonester/dxvk-Fallout4/commit/d78239ba8a1b686b6fae525d96041ee770d311fd)) — Turns out "the driver supports this" depends heavily on the exact format and purpose of a given texture (a depth buffer isn't a swap-chain buffer isn't a motion-vector target). Some combinations didn't support the new ticket type, so texture creation started failing outright for those. Fixed by re-checking support *per texture*, right before it's created, and quietly falling back to the old opaque ticket when the new one isn't supported for that specific texture.
+4. **The quiet fallback wasn't quiet enough** ([`cf874ef6`](https://github.com/skonester/dxvk-Fallout4/commit/cf874ef61e3ecb636b2c6921b09437926ff3ff63)) — For most textures, silently falling back to the opaque ticket is perfectly fine — it just means that particular texture won't be D3D12-shareable, no big deal. But for the handful of textures FO4FSRUpscaler *itself* creates specifically to hand to its D3D12 device, a silent fallback is actively harmful: the plugin gets a ticket back that looks valid, hands it to D3D12, and the driver crashes uncatchably deep inside `OpenSharedHandle` — no exception a plugin's own error handling could ever catch. The fix lets the plugin flag its own textures as "this one *must* be D3D12-compatible or I need to know now" — so instead of a silent, unrecoverable crash, DXVK throws a normal, catchable error that the plugin can catch and gracefully disable upscaling for, instead of your game just vanishing off the taskbar.
+
+### What this means for you
+
+* If you don't use FO4FSRUpscaler, none of this code path ever activates — it's dormant plumbing.
+* If you do, this is the difference between the upscaler working, degrading gracefully, or hard-crashing depending on your specific GPU driver's support for D3D↔Vulkan handle interop.
+* This is compatibility glue, not a performance feature on its own — the actual FPS/latency wins come from FSR itself (a separate plugin) plus the [Experimental SIMD build](#experimental-simd--avx2-build) and [optimized `dxvk.conf`](#optimized-dxvk-configuration-dxvkconf) above.
 
 ---
 
