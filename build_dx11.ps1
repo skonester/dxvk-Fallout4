@@ -17,6 +17,32 @@ function Prepend-Path {
     }
 }
 
+function Invoke-NativeCommand {
+    # Native tools (meson in particular) write progress output to stderr.
+    # Under $ErrorActionPreference = "Stop", PowerShell 5.1 turns any stderr
+    # line from a native command into a terminating error whenever the
+    # script's output is piped or redirected (e.g. logging to a file, CI
+    # log capture) -- even though the tool itself exits 0. Merge streams and
+    # print manually so stderr text is treated as plain output, then rely on
+    # $LASTEXITCODE for the real success/failure signal.
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments
+    )
+
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $FilePath @Arguments 2>&1 | ForEach-Object { Write-Host $_ }
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "$FilePath failed with exit code $LASTEXITCODE."
+    }
+}
+
 function Get-CommandSource {
     param([Parameter(Mandatory = $true)][string]$Name)
 
@@ -136,10 +162,7 @@ function Invoke-MesonSetup {
 
     $meson = Get-CommandSource "meson.exe"
     if ($meson) {
-        & $meson setup $BuildDir @MesonOptions
-        if ($LASTEXITCODE -ne 0) {
-            throw "Meson setup failed with exit code $LASTEXITCODE."
-        }
+        Invoke-NativeCommand $meson setup $BuildDir @MesonOptions
         return
     }
 
@@ -152,13 +175,9 @@ function Invoke-MesonSetup {
     }
 
     if ((Split-Path -Leaf $python) -ieq "py.exe") {
-        & $python -3 -m mesonbuild.mesonmain setup $BuildDir @MesonOptions
+        Invoke-NativeCommand $python -3 -m mesonbuild.mesonmain setup $BuildDir @MesonOptions
     } else {
-        & $python -m mesonbuild.mesonmain setup $BuildDir @MesonOptions
-    }
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Meson setup failed with exit code $LASTEXITCODE."
+        Invoke-NativeCommand $python -m mesonbuild.mesonmain setup $BuildDir @MesonOptions
     }
 }
 
@@ -250,10 +269,7 @@ if (-not (Test-Path $buildDir)) {
 }
 
 Write-Host "Starting build..." -ForegroundColor Cyan
-ninja -C $buildDir
-if ($LASTEXITCODE -ne 0) {
-    throw "Ninja build failed with exit code $LASTEXITCODE."
-}
+Invoke-NativeCommand ninja -C $buildDir
 
 Write-Host "Build complete! Output binaries:" -ForegroundColor Green
 Get-ChildItem "$buildDir/src/**/*.dll" | Select-Object Name, FullName, Length | Format-Table
