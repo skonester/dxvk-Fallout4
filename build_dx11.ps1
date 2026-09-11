@@ -182,8 +182,10 @@ function Invoke-MesonSetup {
 }
 
 $buildDir = if ($env:DXVK_BUILD_DIR) { $env:DXVK_BUILD_DIR } else { "build_clang" }
+$buildType = if ($env:DXVK_BUILDTYPE) { $env:DXVK_BUILDTYPE } else { "release" }
 $mesonOptions = @(
     "--backend", "ninja",
+    "--buildtype", $buildType,
     "-Denable_d3d8=false",
     "-Denable_d3d9=false",
     "-Denable_d3d10=false",
@@ -261,7 +263,7 @@ if (Test-Path $buildDir) {
 }
 
 if (-not (Test-Path $buildDir)) {
-    Write-Host "Configuring build directory with Meson..." -ForegroundColor Cyan
+    Write-Host "Configuring build directory with Meson (buildtype: $buildType)..." -ForegroundColor Cyan
     Invoke-MesonSetup -BuildDir $buildDir -MesonOptions $mesonOptions
 } else {
     Write-Host "Build directory already exists. Skipping setup configuration." -ForegroundColor Yellow

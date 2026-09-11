@@ -2,6 +2,9 @@ name: Build
 
 on: [push, pull_request, workflow_dispatch]
 
+permissions:
+  contents: write
+
 jobs:
   build-standard:
     name: Standard (D3D11/DXGI)
@@ -85,3 +88,49 @@ jobs:
       with:
         name: dxvk-fo4-${{ env.VERSION_NAME }}-experimental-simd
         path: artifacts\*
+
+  publish-draft-release:
+    name: Publish Draft Release
+    needs: [build-standard, build-experimental-simd]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download standard artifact
+      uses: actions/download-artifact@v4
+      with:
+        pattern: dxvk-fo4-*-standard
+        path: standard
+        merge-multiple: true
+
+    - name: Download experimental SIMD artifact
+      uses: actions/download-artifact@v4
+      with:
+        pattern: dxvk-fo4-*-experimental-simd
+        path: experimental-simd
+        merge-multiple: true
+
+    - name: Package release assets
+      run: |
+        cd standard && zip -r ../dxvk-fo4-standard.zip x64 && cd ..
+        cd experimental-simd && zip -r ../dxvk-fo4-experimental-simd.zip x64 && cd ..
+
+    - name: Publish draft release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: latest-build
+        name: "Latest build (master)"
+        target_commitish: ${{ github.sha }}
+        draft: true
+        body: |
+          Automated draft build from commit ${{ github.sha }} on `master`.
+
+          - `dxvk-fo4-standard.zip` -- default build (frame governor + FO4FSRUpscaler patches)
+          - `dxvk-fo4-experimental-simd.zip` -- opt-in AVX2/FMA SIMD build
+
+          This draft is overwritten on every push to master. Review and publish manually when ready.
+        files: |
+          dxvk-fo4-standard.zip
+          dxvk-fo4-experimental-simd.zip
